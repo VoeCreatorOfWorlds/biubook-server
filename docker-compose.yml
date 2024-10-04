@@ -11,9 +11,11 @@ services:
       - redis
     env_file:
       - ./.env
+    platform: linux/arm64
 
   redis:
     image: redis:alpine
+    platform: linux/arm64
     ports:
       - "6379:6379"
     volumes:

@@ -1,86 +1,61 @@
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
-import { LLM_API_KEY } from "../constants";
+import Anthropic from "@anthropic-ai/sdk";
+import { Message, ToolUseBlock } from "@anthropic-ai/sdk/resources";
+import { Logger } from 'winston';
 
-if (!LLM_API_KEY) {
-  throw new Error("LLM API key is not set");
-}
+class AIModelHandler {
+  private anthropic: Anthropic;
+  private logger: Logger;
 
-const genAI = new GoogleGenerativeAI(LLM_API_KEY);
+  constructor(apiKey: string, logger: Logger) {
+    this.anthropic = new Anthropic({
+      apiKey: apiKey,
+    });
+    this.logger = logger;
+  }
 
-// Define the schema for structured output
-const cartProductSchema = {
-  description: "List of products in the cart",
-  type: SchemaType.ARRAY,
-  items: {
-    type: SchemaType.OBJECT,
-    properties: {
-      productName: {
-        type: SchemaType.STRING,
-        description: "Name of the product",
-        nullable: false,
-      },
-      price: {
-        type: SchemaType.NUMBER,
-        description: "Price of the product",
-        nullable: false,
-      },
-      quantity: {
-        type: SchemaType.NUMBER,
-        description: "Quantity of the product",
-        nullable: false,
-      },
-    },
-    required: ["productName", "price", "quantity"],
-  },
-};
+  async generateStructuredContent(prompt: string, schema: any): Promise<any> {
+    const systemPrompt = `You are a helpful AI assistant that processes content and returns structured data according to the given schema. Always use the provided JSON tool to structure your response.`;
 
-// Define the model with structured output configuration
-const model = genAI.getGenerativeModel({
-  model: "gemini-1.5-pro",
-  generationConfig: {
-    responseMimeType: "application/json",
-    responseSchema: cartProductSchema,
-  },
-});
-
-// Define types for our responses
-interface CartProduct {
-  productName: string;
-  price: number;
-  quantity: number;
-}
-
-interface GenerationResult {
-  cartProducts: CartProduct[];
-  rawResponse: string;
-}
-
-export const listCartProducts = async (cartDescription: string): Promise<GenerationResult> => {
-  let prompt = `List the products in this cart with their names, prices, and quantities: ${cartDescription}`;
-
-  try {
-    const result = await model.generateContent(prompt);
-    const rawResponse = result.response.text();
-
-    // Parse the raw response to extract the cart products
-    const cartProducts: CartProduct[] = JSON.parse(rawResponse);
-
-    return {
-      cartProducts,
-      rawResponse
+    const jsonTool = {
+      name: "structure_json",
+      description: "Structure the content according to the given schema",
+      input_schema: schema,
     };
-  } catch (error) {
-    console.error('Error listing cart products:', error);
-    throw new Error('Failed to list cart products');
-  }
-};
 
-export const generateCustomPrompt = async (prompt: string): Promise<string> => {
-  try {
-    const result = await model.generateContent(prompt);
-    return result.response.text();
-  } catch (error) {
-    console.error('Error generating content:', error);
-    throw new Error('Failed to generate content');
+    try {
+      const response = await this.anthropic.messages.create({
+        model: "claude-3-opus-20240229",
+        max_tokens: 4096,
+        temperature: 0.2,
+        system: systemPrompt,
+        messages: [
+          { role: "user", content: prompt }
+        ],
+        tools: [jsonTool]
+      });
+
+      const toolOutput = this.extractToolOutput(response);
+
+      if (!toolOutput) {
+        throw new Error('No tool output found in Claude response');
+      }
+
+      this.logger.debug('Structured data extracted successfully from Claude');
+      return toolOutput;
+    } catch (error) {
+      this.logger.error(`Error generating structured content: ${error instanceof Error ? error.message : 'Unknown error'}`, { error });
+      throw new Error('Failed to generate structured content');
+    }
   }
-};
+
+  private extractToolOutput(response: Message): any | null {
+    for (const contentBlock of response.content) {
+      if (contentBlock.type === 'tool_use' && contentBlock.name === 'structure_json') {
+        return contentBlock.input
+      }
+    }
+    return null;
+  }
+}
+
+export default AIModelHandler;
