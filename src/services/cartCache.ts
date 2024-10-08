@@ -102,7 +102,24 @@ class CartCache {
     }
 
     private async generateCartProducts(cartDescription: string): Promise<GenerationResult> {
-        const prompt = `List the products in this cart with their names, prices, and quantities: ${cartDescription}`;
+        const prompt = `You are a shopping assistant that can read what a user has in their cart based on HTML innerText.
+Your task is to list the products in the cart based on the user's description.
+Please provide your response in the following JSON format:
+
+{
+    "cartProducts": [
+        {
+            "productName": "string",
+            "price": number,
+            "quantity": number
+        }
+    ]
+}
+
+Ensure that all fields are present for each product and that the types are correct.
+The productName must be in close proximity to related content such as "in stock", "add to cart", price, etc.
+Only include products that are clearly part of the cart or shopping list.
+If you're unsure about a product or its details, do not include it in the list. Here is the cart: ${cartDescription}`;
 
         try {
             const result = await this.model.generateContent(prompt);

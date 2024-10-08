@@ -131,7 +131,7 @@ export interface AnchorLink {
 }
 
 export interface ProductSearchItem {
-  title: string;
+  productName: string;
   price: number;
 }
 

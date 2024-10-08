@@ -14,6 +14,7 @@ interface CartRetrievalResponse {
     price: number;
     quantity: number;
   }>;
+  total?: number;
 }
 
 // Instantiate CartCache outside the handler
@@ -57,6 +58,7 @@ async function retrieveCartContents(userId: string, cartDescription: string): Pr
   try {
     console.log('Calling cartCache.getCartProducts');
     const { cartProducts } = await cartCache.getCartProducts(userId, cartDescription);
+    console.log('Retrieved cart products:', cartProducts);
 
     return { cartProducts };
   } catch (error) {
