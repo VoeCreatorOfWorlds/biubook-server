@@ -41,10 +41,7 @@ export async function retrieveCartHandler(req: AuthenticatedRequest, res: Respon
     return;
   }
 
-  const userId = req.user.email; // Assuming the email is used as the user identifier
-
-  console.log('Cart description:', cartDescription);
-  console.log('User ID:', userId);
+  const userId = req.user.email;
 
   try {
     console.log('Calling retrieveCartContents');
@@ -60,8 +57,6 @@ async function retrieveCartContents(userId: string, cartDescription: string): Pr
   try {
     console.log('Calling cartCache.getCartProducts');
     const { cartProducts } = await cartCache.getCartProducts(userId, cartDescription);
-    
-    console.log('Cart products retrieved for user:', userId);
 
     return { cartProducts };
   } catch (error) {

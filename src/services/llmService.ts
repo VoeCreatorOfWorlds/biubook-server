@@ -1,46 +1,48 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { Message, ToolUseBlock } from "@anthropic-ai/sdk/resources";
+import { GoogleGenerativeAI, GenerativeModel, GenerationConfig, SchemaType } from "@google/generative-ai";
 import { Logger } from 'winston';
 
-class AIModelHandler {
-  private anthropic: Anthropic;
+class AIModelHandlerImp {
+  private genAI: GoogleGenerativeAI;
+  private model: GenerativeModel;
   private logger: Logger;
 
   constructor(apiKey: string, logger: Logger) {
-    this.anthropic = new Anthropic({
-      apiKey: apiKey,
-    });
+    this.genAI = new GoogleGenerativeAI(apiKey);
+    this.model = this.genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
     this.logger = logger;
   }
 
   async generateStructuredContent(prompt: string, schema: any): Promise<any> {
-    const systemPrompt = `You are a helpful AI assistant that processes content and returns structured data according to the given schema. Always use the provided JSON tool to structure your response.`;
-
-    const jsonTool = {
-      name: "structure_json",
-      description: "Structure the content according to the given schema",
-      input_schema: schema,
+    const generationConfig: GenerationConfig = {
+      temperature: 0.2,
+      topK: 1,
+      topP: 1,
+      maxOutputTokens: 4096,
     };
 
+    const responseSchema = this.convertSchemaToGeminiFormat(schema);
+
     try {
-      const response = await this.anthropic.messages.create({
-        model: "claude-3-opus-20240229",
-        max_tokens: 4096,
-        temperature: 0.2,
-        system: systemPrompt,
-        messages: [
-          { role: "user", content: prompt }
-        ],
-        tools: [jsonTool]
+      const result = await this.model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig,
+        tools: [{
+          functionDeclarations: [{
+            name: "structure_json",
+            description: "Structure the content according to the given schema",
+            parameters: responseSchema
+          }]
+        }]
       });
 
+      const response = result.response;
       const toolOutput = this.extractToolOutput(response);
 
       if (!toolOutput) {
-        throw new Error('No tool output found in Claude response');
+        throw new Error('No tool output found in Gemini response');
       }
 
-      this.logger.debug('Structured data extracted successfully from Claude');
+      this.logger.debug('Structured data extracted successfully from Gemini');
       return toolOutput;
     } catch (error) {
       this.logger.error(`Error generating structured content: ${error instanceof Error ? error.message : 'Unknown error'}`, { error });
@@ -48,14 +50,34 @@ class AIModelHandler {
     }
   }
 
-  private extractToolOutput(response: Message): any | null {
-    for (const contentBlock of response.content) {
-      if (contentBlock.type === 'tool_use' && contentBlock.name === 'structure_json') {
-        return contentBlock.input
+  private convertSchemaToGeminiFormat(schema: any): any {
+    // Convert the input schema to Gemini's expected format
+    const convertedSchema: any = {
+      type: SchemaType.OBJECT,
+      properties: {},
+      required: []
+    };
+
+    for (const [key, value] of Object.entries(schema.properties)) {
+      convertedSchema.properties[key] = {
+        type: (value as any).type,
+        description: (value as any).description
+      };
+      if (schema.required && schema.required.includes(key)) {
+        convertedSchema.required.push(key);
       }
+    }
+
+    return convertedSchema;
+  }
+
+  private extractToolOutput(response: any): any | null {
+    const functionCall = response.candidates[0]?.content?.parts[0]?.functionCall;
+    if (functionCall && functionCall.name === 'structure_json') {
+      return JSON.parse(functionCall.args.json);
     }
     return null;
   }
 }
 
-export default AIModelHandler;
+export default AIModelHandlerImp;

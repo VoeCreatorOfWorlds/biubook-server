@@ -4,11 +4,12 @@ const cors = require("cors")
 import * as dotenv from 'dotenv';
 import { loginHandler, signupHandler } from './auth';
 import { authMiddleware } from './middleware';
-import { checkExpenseHandler } from './expenseHandler';
 import { retrieveCartHandler } from './getCartContents';
 import { getCardByIdHandler, getCardsHandler } from './cardHandler';
 import { kycStatusHandler } from './onboardingHandler';
-import { searchProductsHandler, shutdownGracefully } from './eCommerceHandler';
+import { checkExpenseHandler } from './eCommerceHandler';
+import { mockCheckExpenseHandler } from './ecoommerceMockHandler';
+import { mockRetrieveCartHandler } from './mockCartHandler';
 
 dotenv.config();
 const app = express();
@@ -19,20 +20,15 @@ app.use(cors());
 
 app.post('/login', loginHandler);
 app.post('/signup', signupHandler);
-app.post('/check-expense', authMiddleware, checkExpenseHandler);
 app.post('/cart-contents', authMiddleware, retrieveCartHandler);
 app.get('/cards', authMiddleware, getCardsHandler);
 app.get('/cards/:id', authMiddleware, getCardByIdHandler);
 app.get('/kyc-check', authMiddleware, kycStatusHandler);
 
-app.post('/search-products', authMiddleware, searchProductsHandler);
+app.post('/search-products', authMiddleware, checkExpenseHandler);
+app.post('/mock-search-products', authMiddleware, mockCheckExpenseHandler);
+app.post('/mock-cart-contents', authMiddleware, mockRetrieveCartHandler);
 
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
-});
-
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  await shutdownGracefully();
-  process.exit(0);
 });

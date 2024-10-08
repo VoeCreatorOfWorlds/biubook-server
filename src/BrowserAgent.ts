@@ -1,9 +1,12 @@
-import puppeteer, { Browser, KeyInput, KeyPressOptions, Page } from 'puppeteer';
-import crypto from 'crypto';
-import ProductSearcher from './services/productSearchService';
-import { createLogger, transports, format } from 'winston';
+import puppeteer, { Browser, Page } from 'puppeteer';
+import { createLogger, transports, format, Logger } from 'winston';
+import { ProductSearchResult, IBrowserAgent, AIModelHandler, AdvancedHTMLParser, PopupDetector } from './types';
+import ProductSearcherImp from './services/productSearchService';
+import AIModelHandlerImp from './services/llmService';
+import { AdvancedHTMLParserImp } from './services/advancedHTMLService';
+import PopupDetectorImp from './PopupDetector';
 
-const logger = createLogger({
+const logger: Logger = createLogger({
   level: 'debug',
   format: format.combine(
     format.timestamp(),
@@ -15,13 +18,19 @@ const logger = createLogger({
   ]
 });
 
-class BrowserAgent {
+class BrowserAgent implements IBrowserAgent {
   private browser: Browser | null = null;
   private page: Page | null = null;
-  private productSearcher: ProductSearcher;
+  private productSearcher: ProductSearcherImp;
+  private aiModelHandler: AIModelHandler;
+  private htmlParser: AdvancedHTMLParser;
+  private popupDetector: PopupDetector;
 
-  constructor(googleAIApiKey: string, redisUrl: string) {
-    this.productSearcher = new ProductSearcher(googleAIApiKey, logger);
+  constructor(anthropicApiKey: string, redisUrl: string) {
+    this.aiModelHandler = new AIModelHandlerImp(anthropicApiKey, logger);
+    this.htmlParser = new AdvancedHTMLParserImp(logger);
+    this.popupDetector = new PopupDetectorImp(logger);
+    this.productSearcher = new ProductSearcherImp(logger, this.htmlParser, this.popupDetector);
   }
 
   async initialize(): Promise<void> {
@@ -37,24 +46,43 @@ class BrowserAgent {
     }
   }
 
+  async searchProduct(
+    productName: string,
+    siteUrl: string,
+    maxResults?: number
+  ): Promise<ProductSearchResult[]> {
+    logger.info(`Searching for product: ${productName} on ${siteUrl}`);
+
+    const products = await this.performProductSearch(siteUrl, productName, maxResults);
+    return [{ siteUrl, products: products.map(p => ({ ...p, url: "", siteUrl })) }];
+
+  }
+
   async navigateToEcommerceSite(url: string): Promise<void> {
     if (!this.page) throw new Error("Page not initialized");
     await this.page.goto(url, { waitUntil: 'networkidle0' });
-    console.log(`Navigated to ${url}`);
+    logger.info(`Navigated to ${url}`);
   }
 
   async performProductSearch(siteUrl: string, searchTerm: string, maxResults: number = 3) {
     await this.initialize();
     try {
+      // structure of urls 'www.takealot.com', 'businessasmission.com'
+      // let's ensure urls are correctly formatted and ncan be navigated to
+      if (!siteUrl.startsWith('https://')) {
+        siteUrl = `https://${siteUrl}`;
+      }
+      console.log(`Navigating to ${siteUrl}`);
       await this.navigateToEcommerceSite(siteUrl);
       if (!this.page) throw new Error("Page not initialized");
       const products = await this.productSearcher.searchProducts(this.page, searchTerm, maxResults);
       return products;
     } catch (error) {
-      console.error(`Product search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      logger.error(`Product search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       throw error;
     }
   }
+
   async close(): Promise<void> {
     if (this.page) {
       await this.page.close();

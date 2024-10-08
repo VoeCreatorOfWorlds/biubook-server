@@ -1,34 +1,67 @@
 import { Page, ElementHandle } from 'puppeteer';
 import { Logger } from 'winston';
-//import { AdvancedHTMLParser, AnchorLink } from './services/advancedHTMLService';
-import { AdvancedHTMLParser, AnchorLink } from './advancedHTMLService';
-import PopupDetector from '../PopupDetector';
-import AIModelHandler from './llmService';
+import { AnchorLink } from './advancedHTMLService';
+import { ProductSearcher as IProductSearcher, Product } from '../types';
+import { AdvancedHTMLParser } from '../types';
+import { PopupDetector } from '../types';
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { LLM_API_KEY } from "../constants";
+
 interface ProductSearchItem {
   title: string;
   price: number;
 }
 
-interface Product extends ProductSearchItem {
-  url: string;
-}
-
-class ProductSearcher {
+class ProductSearcherImp implements IProductSearcher {
   private logger: Logger;
   private htmlParser: AdvancedHTMLParser;
   private popupDetector: PopupDetector;
-  private aiModelHandler: AIModelHandler;
+  private genAI: GoogleGenerativeAI;
+  private model: any; // Using 'any' here as the exact type is not provided in the Google AI library
 
-  constructor(anthropicApiKey: string, logger: Logger) {
+  constructor(logger: Logger, htmlParser: AdvancedHTMLParser, popupDetector: PopupDetector) {
     this.logger = logger;
     this.logger.info('Initializing ProductSearcher');
-    this.htmlParser = new AdvancedHTMLParser(logger);
-    this.popupDetector = new PopupDetector(logger);
-    this.aiModelHandler = new AIModelHandler(anthropicApiKey, logger);
+    this.htmlParser = htmlParser;
+    this.popupDetector = popupDetector;
+
+    if (!LLM_API_KEY) {
+      throw new Error("LLM_API_KEY is not set");
+    }
+
+    this.genAI = new GoogleGenerativeAI(LLM_API_KEY);
+    this.model = this.genAI.getGenerativeModel({
+      model: "gemini-1.5-flash",
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: this.getProductSearchSchema(),
+      },
+    });
+
     this.logger.info('ProductSearcher initialized successfully');
   }
 
-  async searchProducts(page: Page, searchTerm: string, maxResults: number = 3): Promise<Product[]> {
+  private getProductSearchSchema() {
+    return {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          title: {
+            type: SchemaType.STRING,
+            description: "Title of the product",
+          },
+          price: {
+            type: SchemaType.NUMBER,
+            description: "Price of the product",
+          },
+        },
+        required: ["title", "price"],
+      },
+    };
+  }
+
+  public async searchProducts(page: Page, searchTerm: string, maxResults: number = 3): Promise<Product[]> {
     this.logger.info(`Starting product search for term: "${searchTerm}", max results: ${maxResults}`);
     try {
       await this.popupDetector.handlePopup(page);
@@ -56,7 +89,7 @@ class ProductSearcher {
     }
   }
 
-  private async findSearchInput(page: Page): Promise<ElementHandle<Element> | null> {
+  public async findSearchInput(page: Page): Promise<ElementHandle<Element> | null> {
     this.logger.debug('Finding search input');
     try {
       const pageContent = await page.content();
@@ -82,7 +115,7 @@ class ProductSearcher {
     }
   }
 
-  private async performSearch(page: Page, searchInput: ElementHandle<Element>, searchTerm: string): Promise<void> {
+  public async performSearch(page: Page, searchInput: ElementHandle<Element>, searchTerm: string): Promise<void> {
     this.logger.debug(`Performing search for term: "${searchTerm}"`);
     try {
       await searchInput.type(searchTerm);
@@ -95,42 +128,23 @@ class ProductSearcher {
     }
   }
 
-  private async getStructuredDataFromAI(content: string, maxResults: number): Promise<ProductSearchItem[]> {
-    const schema = {
-      type: "object",
-      properties: {
-        products: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              title: { type: "string" },
-              price: { type: "number" },
-            },
-            required: ["title", "price"],
-          },
-        },
-      },
-      required: ["products"],
-    };
-
-    const prompt = `Given the following content of a search results page, extract the relevant information for the first ${maxResults} products including their titles and prices:
-
-${content}
-
-Remember to return a JSON object with a 'products' array containing objects with 'title' and 'price' properties.`;
+  public async getStructuredDataFromAI(content: string, maxResults: number): Promise<ProductSearchItem[]> {
+    const prompt = `List the first ${maxResults} products from this search results page with their titles and prices: ${content}`;
 
     try {
-      const result = await this.aiModelHandler.generateStructuredContent(prompt, schema);
+      const result = await this.model.generateContent(prompt);
+      const rawResponse = result.response.text();
+      const productSearchItems: ProductSearchItem[] = JSON.parse(rawResponse);
+
       this.logger.debug('Structured data extracted successfully from AI');
-      return result.products.slice(0, maxResults);
+      return productSearchItems.slice(0, maxResults);
     } catch (error) {
       this.logger.error(`Error getting structured data from AI: ${error instanceof Error ? error.message : 'Unknown error'}`, { error });
       throw new Error('Failed to extract structured data from AI');
     }
   }
 
-  private async identifyProductLinks(anchorLinks: AnchorLink[], productSearchItems: ProductSearchItem[], searchTerm: string): Promise<Product[]> {
+  public async identifyProductLinks(anchorLinks: AnchorLink[], productSearchItems: ProductSearchItem[], searchTerm: string): Promise<Product[]> {
     this.logger.debug('Identifying product links from anchor tags and search results');
     console.log("Number of anchor links: ", anchorLinks.length);
     console.log("Number of product search items: ", productSearchItems.length);
@@ -138,48 +152,33 @@ Remember to return a JSON object with a 'products' array containing objects with
     const linkPairs = anchorLinks.map(link => `${link.href}|||${link.innerText}`).join('\n');
     const productItems = productSearchItems.map(item => `${item.title}|||${item.price}`).join('\n');
 
-    const schema = {
-      type: "object",
-      properties: {
-        mappedProducts: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              title: { type: "string" },
-              price: { type: "number" },
-              url: { type: "string" },
-            },
-            required: ["title", "price", "url"],
-          },
-        },
-      },
-      required: ["mappedProducts"],
-    };
-
-    const prompt = `Given the following:
-
-1. A list of URL and text pairs from anchor tags:
-${linkPairs}
-
-2. A list of product search results with titles and prices:
+    const prompt = `Map these products to the most relevant URLs:
+Products:
 ${productItems}
 
-3. The search term: "${searchTerm}"
+URLs:
+${linkPairs}
 
-Task: Map each product search result to the most appropriate URL from the anchor tags. Consider the relevance of the URL text to the product title and the search term. If no suitable URL is found for a product, use an empty string.
+Search term: "${searchTerm}"
 
-Return a JSON object with a 'mappedProducts' array, each item containing the title, price, and mapped URL.`;
+Return a JSON array of objects with 'title', 'price', and 'url' properties. Use an empty string for 'url' if no match is found.`;
 
     try {
-      const result = await this.aiModelHandler.generateStructuredContent(prompt, schema);
-      this.logger.debug(`Mapped ${result.mappedProducts.length} products to URLs`);
-      return result.mappedProducts;
+      const result = await this.model.generateContent(prompt);
+      const rawResponse = result.response.text();
+      const mappedProducts: Product[] = JSON.parse(rawResponse);
+
+      this.logger.debug(`Mapped ${mappedProducts.length} products to URLs`);
+      return mappedProducts.map(item => ({
+        productName: item.productName,
+        price: item.price,
+        url: ""
+      }));
     } catch (error) {
       this.logger.error(`Error mapping product links: ${error instanceof Error ? error.message : 'Unknown error'}`, { error });
-      return productSearchItems.map(item => ({ ...item, url: '' }));
+      return productSearchItems.map(item => ({ productName: item.title, price: item.price, url: '' }));
     }
   }
 }
 
-export default ProductSearcher;
+export default ProductSearcherImp;

@@ -1,5 +1,6 @@
 import { JSDOM } from 'jsdom';
 import { Logger } from 'winston';
+import { AdvancedHTMLParser as iAdvancedHTMLParser } from '../types';
 
 interface AnchorLink {
     innerText: string;
@@ -13,7 +14,7 @@ interface ParsedContent {
     anchorLinks: AnchorLink[];
 }
 
-class AdvancedHTMLParser {
+class AdvancedHTMLParserImp implements iAdvancedHTMLParser {
     private logger: Logger;
     private dom: JSDOM | null = null;
     private rawBody: string = '';
@@ -207,4 +208,4 @@ class AdvancedHTMLParser {
     }
 }
 
-export { AdvancedHTMLParser, AnchorLink, ParsedContent };
+export { AdvancedHTMLParserImp, AnchorLink, ParsedContent };

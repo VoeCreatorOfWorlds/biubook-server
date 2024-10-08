@@ -1,20 +1,23 @@
 import { Page } from 'puppeteer';
 import { Logger } from 'winston';
-import { AdvancedHTMLParser } from './services/advancedHTMLService';
+import { AdvancedHTMLParserImp, ParsedContent } from './services/advancedHTMLService';
+import {
+    PopupDetectionResult,
+    PopupDetector as IPopupDetector,
+    IsElementVisibleFunction,
+    FindRejectButtonFunction,
+    PopupEvaluationResult,
+    PopupEvaluationFunction
+} from './types';
 
-interface PopupDetectionResult {
-    isPopup: boolean;
-    rejectButtonSelector?: string;
-}
-
-class PopupDetector {
+class PopupDetectorImp implements IPopupDetector {
     private logger: Logger;
-    private htmlParser: AdvancedHTMLParser;
+    private htmlParser: AdvancedHTMLParserImp;
     private readonly POPUP_MAX_CHAR_LENGTH = 5000; // Maximum character length for a cookie popup
 
     constructor(logger: Logger) {
         this.logger = logger;
-        this.htmlParser = new AdvancedHTMLParser(logger);
+        this.htmlParser = new AdvancedHTMLParserImp(logger);
     }
 
     async detectPopup(page: Page): Promise<PopupDetectionResult> {
@@ -23,50 +26,9 @@ class PopupDetector {
         try {
             const pageContent = await page.content();
             const rootDomain = new URL(page.url()).hostname;
-            const parsedContent = this.htmlParser.parseHTML(pageContent, rootDomain);
+            const parsedContent: ParsedContent = this.htmlParser.parseHTML(pageContent, rootDomain);
 
-            const popupInfo = await page.evaluate((POPUP_MAX_CHAR_LENGTH, bodyContent) => {
-                const isElementVisible = (element: Element): boolean => {
-                    const style = window.getComputedStyle(element);
-                    return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
-                };
-
-                const findRejectButton = (element: Element): string | null => {
-                    const buttons = element.querySelectorAll('button, a, input[type="button"]');
-                    for (const button of buttons) {
-                        const buttonText = button.textContent?.toLowerCase() || '';
-                        if (['reject', 'decline', 'no thanks', 'close', 'dismiss', 'accept', 'agree', 'got it', 'i understand'].some(text => buttonText.includes(text))) {
-                            const id = button.id ? `#${button.id}` : '';
-                            const classes = Array.from(button.classList).map(c => `.${c}`).join('');
-                            const tag = button.tagName.toLowerCase();
-                            return `${tag}${id}${classes}`;
-                        }
-                    }
-                    return null;
-                };
-
-                const possiblePopups = document.querySelectorAll('div[class*="popup"], div[class*="modal"], div[id*="cookie"], div[class*="cookie"], div[class*="consent"]');
-
-                for (const popup of possiblePopups) {
-                    // Initial filter: check content length
-                    if (popup.innerHTML.length > POPUP_MAX_CHAR_LENGTH) {
-                        continue; // Skip this element if it's too large
-                    }
-
-                    if (isElementVisible(popup)) {
-                        const rejectButtonSelector = findRejectButton(popup);
-                        if (rejectButtonSelector) {
-                            return {
-                                isPopup: true,
-                                rejectButtonSelector,
-                                popupLength: popup.innerHTML.length
-                            };
-                        }
-                    }
-                }
-
-                return { isPopup: false };
-            }, this.POPUP_MAX_CHAR_LENGTH, parsedContent.bodyContent);
+            const popupInfo: PopupEvaluationResult = await page.evaluate(this.evaluatePopup, this.POPUP_MAX_CHAR_LENGTH, parsedContent.bodyContent);
 
             if (popupInfo.isPopup) {
                 this.logger.info('Popup detected', {
@@ -102,6 +64,49 @@ class PopupDetector {
             }
         }
     }
+
+    private evaluatePopup: PopupEvaluationFunction = (POPUP_MAX_CHAR_LENGTH, bodyContent) => {
+        const isElementVisible: IsElementVisibleFunction = (element) => {
+            const style = window.getComputedStyle(element);
+            return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+        };
+
+        const findRejectButton: FindRejectButtonFunction = (element) => {
+            const buttons = element.querySelectorAll('button, a, input[type="button"]');
+            for (const button of buttons) {
+                const buttonText = button.textContent?.toLowerCase() || '';
+                if (['reject', 'decline', 'no thanks', 'close', 'dismiss', 'accept', 'agree', 'got it', 'i understand'].some(text => buttonText.includes(text))) {
+                    const id = button.id ? `#${button.id}` : '';
+                    const classes = Array.from(button.classList).map(c => `.${c}`).join('');
+                    const tag = button.tagName.toLowerCase();
+                    return `${tag}${id}${classes}`;
+                }
+            }
+            return null;
+        };
+
+        const possiblePopups = document.querySelectorAll('div[class*="popup"], div[class*="modal"], div[id*="cookie"], div[class*="cookie"], div[class*="consent"]');
+
+        for (const popup of possiblePopups) {
+            // Initial filter: check content length
+            if (popup.innerHTML.length > POPUP_MAX_CHAR_LENGTH) {
+                continue; // Skip this element if it's too large
+            }
+
+            if (isElementVisible(popup)) {
+                const rejectButtonSelector = findRejectButton(popup);
+                if (rejectButtonSelector) {
+                    return {
+                        isPopup: true,
+                        rejectButtonSelector,
+                        popupLength: popup.innerHTML.length
+                    };
+                }
+            }
+        }
+
+        return { isPopup: false };
+    };
 }
 
-export default PopupDetector;
+export default PopupDetectorImp;

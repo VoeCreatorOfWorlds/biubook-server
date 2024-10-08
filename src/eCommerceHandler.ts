@@ -1,52 +1,65 @@
 import { Request, Response } from 'express';
-import BrowserAgent from './BrowserAgent';
 import { LLM_API_KEY, REDIS_URL } from './constants';
+import { ExpenseCheckRequest, ExpenseCheckResult, CartProduct } from './types';
+import BrowserAgent from './BrowserAgent';
+import { CartComparisonService } from './services/cartComparisonService';
+import { OriginalCart } from './helpers/originalCart';
+import { createLogger, transports, format } from 'winston';
+import { searchAndScoreHostnames } from './services/searchEngineService';
+import { log } from 'console';
 
 if (REDIS_URL === undefined || LLM_API_KEY === undefined) {
     console.error('Missing required environment variables. Please check your .env file.');
     process.exit(1);
 }
 
-const browserAgent = new BrowserAgent(LLM_API_KEY, REDIS_URL);
+const logger = createLogger({
+    level: 'info',
+    format: format.combine(
+        format.timestamp(),
+        format.json()
+    ),
+    transports: [
+        new transports.Console(),
+        new transports.File({ filename: 'expense-checker.log' })
+    ]
+});
 
-// Initialize the browser when the module is loaded
-browserAgent.initialize().catch(console.error);
+export const checkExpenseHandler = async (req: Request<{}, {}, ExpenseCheckRequest>, res: Response): Promise<void> => {
+    const { cartProducts, maxResults }: ExpenseCheckRequest = req.body;
+    console.log("Cart products: ", cartProducts);
 
-interface AnalyzeCartRequest {
-    siteUrl: string;
-    userEmail: string;
-}
-
-interface SearchProductsRequest {
-    siteUrl: string;
-    searchTerm: string;
-    maxResults?: number;
-}
-
-export const searchProductsHandler = async (req: Request<{}, {}, SearchProductsRequest>, res: Response) => {
-    const { siteUrl, searchTerm, maxResults } = req.body;
-
-    console.log(`Received search request: siteUrl=${siteUrl}, searchTerm=${searchTerm}, maxResults=${maxResults}`);
-
-    if (!siteUrl || !searchTerm) {
-        console.warn('Missing required parameters in search request');
-        return res.status(400).json({ success: false, error: 'Missing required parameters' });
+    if (!cartProducts || !Array.isArray(cartProducts) || cartProducts.length === 0) {
+        logger.warn('Missing required parameters in expense check request');
+        res.status(400).json({ success: false, error: 'Missing required parameters' });
+        return;
     }
 
     try {
-        console.log(`Initiating product search on site: ${siteUrl} with term: ${searchTerm}`);
-        const products = await browserAgent.performProductSearch(siteUrl, searchTerm, maxResults);
-        console.log("products: ", products)
-        console.log(`Product search successful: found ${products.length} products`);
-        res.json({ success: true, products });
-    } catch (error) {
-        console.error(`Product search error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
-    }
-};
+        // Search and score hostnames
+        const scoredHostnames = await searchAndScoreHostnames(cartProducts, 10, logger);
+        console.log("Scored hostnames: ", scoredHostnames);
+        const siteUrls = scoredHostnames.slice(0, 3).map(result => result);
 
-// Graceful shutdown function
-export const shutdownGracefully = async () => {
-    console.log('Shutting down gracefully');
-    await browserAgent.close();
+        const browserAgent = new BrowserAgent(LLM_API_KEY!, REDIS_URL!);
+        await browserAgent.initialize(); // Ensure browser is initialized
+
+        const cartComparisonService = new CartComparisonService(browserAgent);
+        const originalCart = new OriginalCart(cartProducts);
+        const alternativeCarts = await cartComparisonService.compareCart(originalCart, siteUrls, maxResults);
+
+        const expenseCheckResult: ExpenseCheckResult = {
+            originalCart,
+            alternativeCarts
+        };
+
+        res.json({ success: true, expenseCheckResult });
+    } catch (error) {
+        logger.error(`Expense check error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+    } finally {
+        // Ensure browser is closed after operation
+        // Note: You might want to manage this differently if you're reusing the BrowserAgent across requests
+        // await browserAgent.close();
+    }
 };

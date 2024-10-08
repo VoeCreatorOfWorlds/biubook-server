@@ -28,7 +28,7 @@ class CartCache {
 
         this.genAI = new GoogleGenerativeAI(LLM_API_KEY);
         this.model = this.genAI.getGenerativeModel({
-            model: "gemini-1.5-pro",
+            model: "gemini-1.5-flash",
             generationConfig: {
                 responseMimeType: "application/json",
                 responseSchema: this.getCartProductSchema(),
@@ -70,13 +70,13 @@ class CartCache {
 
     async getCartProducts(userEmail: string, cartDescription: string): Promise<GenerationResult> {
         const unstructuredHash = this.generateHash(cartDescription);
-        
+
         const cachedUnstructuredHash = await this.redisClient.get(`email:${userEmail}:unstructured`);
 
         if (cachedUnstructuredHash !== unstructuredHash) {
             const result = await this.generateCartProducts(cartDescription);
             const structuredHash = this.generateHash(JSON.stringify(result));
-            
+
             await this.redisClient.set(`email:${userEmail}:unstructured`, unstructuredHash);
             await this.redisClient.set(`email:${userEmail}:structured`, JSON.stringify(result));
             return result;
