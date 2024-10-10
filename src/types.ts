@@ -99,7 +99,7 @@ export interface AlternativeCart {
 
 export interface ExpenseCheckRequest {
   cartProducts: CartProduct[];
-  siteUrls: string[];
+  hostname: string
   maxResults?: number;
 }
 
@@ -214,7 +214,7 @@ export interface PopupDetectorConstructor {
 }
 
 export type IsElementVisibleFunction = (element: Element) => boolean;
-export type FindRejectButtonFunction = (element: Element) => string | null;
+export type FindRejectButtonFunction = (element: Element) => string | undefined;
 
 export interface PopupEvaluationResult {
   isPopup: boolean;
@@ -233,3 +233,4 @@ export type PopupEvaluationFunction = (
 export interface MockCartAugmentedCart extends AlternativeCart {
   total: number;
 }
+

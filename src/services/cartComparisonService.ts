@@ -1,26 +1,62 @@
-import { Cart, AlternativeCart, ProductSearchResult, AlternativeProduct } from '../types';
+import { Cart, AlternativeCart, ProductSearchResult, AlternativeProduct, CartProduct } from '../types';
 import { AlternativeCartImpl } from '../helpers/alternativeCart';
 import { IBrowserAgent } from '../types';
+import { searchAndScoreHostnames } from './searchEngineService';
+import { OriginalCart } from '../helpers/originalCart';
+import { MAX_RESULTS } from '../constants';
+import { createLogger, format, transports } from 'winston';
+
+const logger = createLogger({
+    level: 'info',
+    format: format.combine(
+        format.timestamp(),
+        format.json()
+    ),
+    transports: [
+        new transports.Console(),
+        new transports.File({ filename: 'cart-comparison.log' })
+    ]
+});
 
 export class CartComparisonService {
     constructor(private agent: IBrowserAgent) { }
 
-    async compareCart(originalCart: Cart, siteUrls: string[], maxResults?: number): Promise<AlternativeCart[]> {
+    async compareCart(cartProducts: CartProduct[], hostname: string): Promise<AlternativeCart[]> {
         const alternativeCarts: AlternativeCart[] = [];
+        const originalCart = new OriginalCart(cartProducts);
+        const scoredHostnames = await searchAndScoreHostnames(cartProducts, 10, logger);
+        console.log("Scored hostnames: ", scoredHostnames);
 
-        for (const siteUrl of siteUrls) {
+        // Ensure the hostname is not in the scoredHostnames
+        const hostnameRegex = new RegExp(`^(?:https?:\/\/)?(?:www\.)?${hostname.replace('.', '\\.')}`, 'i');
+        const filteredHostnames = scoredHostnames.filter(scoredHostname => !hostnameRegex.test(scoredHostname));
+        console.log("Filtered hostnames: ", filteredHostnames);
+
+        let count = 0;
+
+        for (const siteUrl of filteredHostnames) {
+            if (count >= MAX_RESULTS) {
+                break;
+            }
+
             const alternativeProducts: AlternativeProduct[] = [];
 
-            for (const product of originalCart.products) {
-                try {
-                    const searchResults = await this.agent.searchProduct(product.productName, siteUrl, maxResults);
+            try {
+                for (const product of originalCart.products) {
+                    const searchResults = await this.agent.searchProduct(product.productName, siteUrl);
                     const cheapestAlternative = this.findCheapestAlternative(searchResults);
                     if (cheapestAlternative) {
                         alternativeProducts.push(cheapestAlternative);
                     }
-                } catch (error) {
-                    continue;
                 }
+
+                if (alternativeProducts.length === originalCart.products.length) {
+                    alternativeCarts.push(new AlternativeCartImpl(alternativeProducts, originalCart.products));
+                    count++;
+                }
+
+            } catch (error) {
+                continue;
             }
 
             if (alternativeProducts.length === originalCart.products.length) {

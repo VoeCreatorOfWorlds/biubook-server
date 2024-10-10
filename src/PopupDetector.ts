@@ -1,4 +1,4 @@
-import { Page } from 'puppeteer';
+import { Page, Dialog } from 'puppeteer';
 import { Logger } from 'winston';
 import { AdvancedHTMLParserImp, ParsedContent } from './services/advancedHTMLService';
 import {
@@ -13,11 +13,26 @@ import {
 class PopupDetectorImp implements IPopupDetector {
     private logger: Logger;
     private htmlParser: AdvancedHTMLParserImp;
-    private readonly POPUP_MAX_CHAR_LENGTH = 5000; // Maximum character length for a cookie popup
+    private readonly POPUP_MAX_CHAR_LENGTH = 5000;
 
     constructor(logger: Logger) {
         this.logger = logger;
         this.htmlParser = new AdvancedHTMLParserImp(logger);
+    }
+
+    async setupDialogHandling(page: Page): Promise<void> {
+        page.on('dialog', async (dialog: Dialog) => {
+            this.logger.info(`Dialog detected: ${dialog.message()}`);
+            await this.handleDialog(dialog);
+        });
+    }
+
+    private async handleDialog(dialog: Dialog): Promise<void> {
+        try {
+            await dialog.dismiss();
+        } catch (error) {
+            this.logger.error(`Error handling dialog: ${error}`);
+        }
     }
 
     async detectPopup(page: Page): Promise<PopupDetectionResult> {
@@ -56,12 +71,18 @@ class PopupDetectorImp implements IPopupDetector {
             this.logger.info(`Attempting to close popup with selector: ${rejectButtonSelector}`);
             try {
                 await page.click(rejectButtonSelector);
-                // Use page.evaluate to create a delay
                 await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 1000)));
                 this.logger.info('Popup closed successfully');
+                return
             } catch (error) {
                 this.logger.error('Failed to close popup:', error);
+                return
             }
+        }
+
+        if (isPopup) {
+            const popupContent = await page.content();
+            console.log("Popup content: ", popupContent);
         }
     }
 
@@ -82,15 +103,14 @@ class PopupDetectorImp implements IPopupDetector {
                     return `${tag}${id}${classes}`;
                 }
             }
-            return null;
+            return undefined;
         };
 
         const possiblePopups = document.querySelectorAll('div[class*="popup"], div[class*="modal"], div[id*="cookie"], div[class*="cookie"], div[class*="consent"]');
 
         for (const popup of possiblePopups) {
-            // Initial filter: check content length
             if (popup.innerHTML.length > POPUP_MAX_CHAR_LENGTH) {
-                continue; // Skip this element if it's too large
+                continue;
             }
 
             if (isElementVisible(popup)) {

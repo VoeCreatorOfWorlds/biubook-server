@@ -6,12 +6,13 @@ import { CartComparisonService } from './services/cartComparisonService';
 import { OriginalCart } from './helpers/originalCart';
 import { createLogger, transports, format } from 'winston';
 import { searchAndScoreHostnames } from './services/searchEngineService';
-import { log } from 'console';
 
 if (REDIS_URL === undefined || LLM_API_KEY === undefined) {
     console.error('Missing required environment variables. Please check your .env file.');
     process.exit(1);
 }
+
+
 
 const logger = createLogger({
     level: 'info',
@@ -26,7 +27,7 @@ const logger = createLogger({
 });
 
 export const checkExpenseHandler = async (req: Request<{}, {}, ExpenseCheckRequest>, res: Response): Promise<void> => {
-    const { cartProducts, maxResults }: ExpenseCheckRequest = req.body;
+    const { cartProducts, hostname }: ExpenseCheckRequest = req.body;
     console.log("Cart products: ", cartProducts);
 
     if (!cartProducts || !Array.isArray(cartProducts) || cartProducts.length === 0) {
@@ -36,17 +37,12 @@ export const checkExpenseHandler = async (req: Request<{}, {}, ExpenseCheckReque
     }
 
     try {
-        // Search and score hostnames
-        const scoredHostnames = await searchAndScoreHostnames(cartProducts, 10, logger);
-        console.log("Scored hostnames: ", scoredHostnames);
-        const siteUrls = scoredHostnames.slice(0, 3).map(result => result);
-
         const browserAgent = new BrowserAgent(LLM_API_KEY!, REDIS_URL!);
         await browserAgent.initialize(); // Ensure browser is initialized
 
         const cartComparisonService = new CartComparisonService(browserAgent);
         const originalCart = new OriginalCart(cartProducts);
-        const alternativeCarts = await cartComparisonService.compareCart(originalCart, siteUrls, maxResults);
+        const alternativeCarts = await cartComparisonService.compareCart(cartProducts, hostname);
 
         const expenseCheckResult: ExpenseCheckResult = {
             originalCart,
