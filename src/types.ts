@@ -184,7 +184,6 @@ export interface AdvancedHTMLParser {
   parseHTML(html: string, rootDomain: string): ParsedContent;
   getRawBody(): string;
   getCleanedBody(): string;
-  getScripts(): string[];
 }
 
 export interface AdvancedHTMLParserConstructor {

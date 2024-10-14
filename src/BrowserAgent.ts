@@ -5,6 +5,7 @@ import ProductSearcherImp from './services/productSearchService';
 import AIModelHandlerImp from './services/llmService';
 import { AdvancedHTMLParserImp } from './services/advancedHTMLService';
 import PopupDetectorImp from './PopupDetector';
+import { LLMService } from './services/llmService';
 
 const logger: Logger = createLogger({
   level: 'debug',
@@ -22,15 +23,15 @@ class BrowserAgent implements IBrowserAgent {
   private browser: Browser | null = null;
   private page: Page | null = null;
   private productSearcher: ProductSearcherImp;
-  private aiModelHandler: AIModelHandler;
+  private aiModelHandler: LLMService;
   private htmlParser: AdvancedHTMLParser;
   private popupDetector: PopupDetector;
 
-  constructor(anthropicApiKey: string, redisUrl: string) {
-    this.aiModelHandler = new AIModelHandlerImp(anthropicApiKey, logger);
+  constructor(anthropicApiKey: string, context: string) {
+    this.aiModelHandler = new AIModelHandlerImp(anthropicApiKey, context);
     this.htmlParser = new AdvancedHTMLParserImp(logger);
     this.popupDetector = new PopupDetectorImp(logger);
-    this.productSearcher = new ProductSearcherImp(logger, this.htmlParser, this.popupDetector);
+    this.productSearcher = new ProductSearcherImp(logger, this.htmlParser, this.popupDetector, this.aiModelHandler);
   }
 
   async initialize(): Promise<void> {
@@ -79,7 +80,7 @@ class BrowserAgent implements IBrowserAgent {
       return products;
     } catch (error) {
       logger.error(`Product search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      throw error;
+      return [];
     }
   }
 

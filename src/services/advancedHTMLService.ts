@@ -1,4 +1,4 @@
-import { JSDOM } from 'jsdom';
+import * as cheerio from 'cheerio';
 import { Logger } from 'winston';
 import { AdvancedHTMLParser as iAdvancedHTMLParser } from '../types';
 
@@ -9,7 +9,6 @@ interface AnchorLink {
 
 interface ParsedContent {
     bodyContent: string;
-    scripts: string[];
     potentialSearchInputs: string[];
     anchorLinks: AnchorLink[];
 }
@@ -18,7 +17,7 @@ type LoggedFunction<T extends (...args: any[]) => any> = T;
 
 class AdvancedHTMLParserImp implements iAdvancedHTMLParser {
     private logger: Logger;
-    private dom: JSDOM | null = null;
+    private $: cheerio.CheerioAPI = cheerio.load('');
     private rawBody: string = '';
     private cleanedBody: string = '';
     private scripts: string[] = [];
@@ -42,39 +41,33 @@ class AdvancedHTMLParserImp implements iAdvancedHTMLParser {
         this.logExecutionTime((html: string, rootDomain: string): ParsedContent => {
             this.logger.debug('Starting HTML parsing process');
             try {
-                this.dom = new JSDOM(html);
-                const { document } = this.dom.window;
+                this.$ = cheerio.load(html);
 
-                if (!document.body) {
-                    throw new Error('Document body is empty or null');
-                }
-
-                const bodyContent = this.getBodyContent(document);
-                const scripts = this.extractScripts(document);
-                const potentialSearchInputs = this.findPotentialSearchInputs(document);
-                const anchorLinks = this.findAnchorLinks(document, rootDomain);
+                const bodyContent = this.getBodyContent();
+                const potentialSearchInputs = this.findPotentialSearchInputs();
+                console.log("potentialSearchInputs: ", potentialSearchInputs);
+                const anchorLinks = this.findAnchorLinks(rootDomain);
+                console.log("anchorLinks: ", anchorLinks);
 
                 this.logger.debug('HTML parsing process completed');
-                return { bodyContent, scripts, potentialSearchInputs, anchorLinks };
+                return { bodyContent, potentialSearchInputs, anchorLinks };
             } catch (error) {
                 this.logger.error('Error during HTML parsing', { error });
-                return { bodyContent: '', scripts: [], potentialSearchInputs: [], anchorLinks: [] };
+                return { bodyContent: '', potentialSearchInputs: [], anchorLinks: [] };
             }
         }, 'parseHTML');
 
-    private getBodyContent: LoggedFunction<(document: Document) => string> =
-        this.logExecutionTime((document: Document): string => {
+    private getBodyContent: LoggedFunction<() => string> =
+        this.logExecutionTime((): string => {
             this.logger.debug('Extracting body content');
-            const body = document.body;
-            if (!body) {
-                this.logger.warn('No body element found in the document');
+            if (!this.$) {
+                this.logger.warn('Cheerio instance not initialized');
                 return '';
             }
 
-            const bodyClone = body.cloneNode(true) as HTMLBodyElement;
-            bodyClone.querySelectorAll('script, style').forEach(el => el.remove());
-            let content = bodyClone.innerHTML;
-            content = content.replace(/\s+/g, ' ').trim();
+            const bodyClone = this.$('body').clone();
+            bodyClone.find('script, style').remove();
+            let content = bodyClone.html() || '';
 
             this.logger.debug(`Extracted body content (first 200 chars): ${content.slice(0, 200)}...`);
             return content;
@@ -90,79 +83,62 @@ class AdvancedHTMLParserImp implements iAdvancedHTMLParser {
             return this.cleanedBody;
         }, 'getCleanedBody');
 
-    public getScripts: LoggedFunction<() => string[]> =
+    private findPotentialSearchInputs: LoggedFunction<() => string[]> =
         this.logExecutionTime((): string[] => {
-            return this.scripts;
-        }, 'getScripts');
-
-    private extractScripts: LoggedFunction<(document: Document) => string[]> =
-        this.logExecutionTime((document: Document): string[] => {
-            this.logger.debug('Extracting scripts');
-            const scripts: string[] = [];
-            try {
-                document.querySelectorAll('script').forEach(script => {
-                    if (script.textContent) {
-                        scripts.push(script.textContent);
-                    }
-                });
-            } catch (error) {
-                this.logger.error('Error extracting scripts', { error });
-            }
-            return scripts;
-        }, 'extractScripts');
-
-    private findPotentialSearchInputs: LoggedFunction<(document: Document) => string[]> =
-        this.logExecutionTime((document: Document): string[] => {
             this.logger.debug('Finding potential search inputs');
             const potentialInputs: Set<string> = new Set();
             const searchRegex = /search|query|find|lookup|seek|q\b/i;
 
-            try {
-                const inputElements = document.querySelectorAll('input');
+            if (!this.$) {
+                this.logger.warn('Cheerio instance not initialized');
+                return Array.from(potentialInputs);
+            }
 
-                inputElements.forEach(input => {
-                    const attributes = input.attributes;
+            try {
+                this.$('input').each((_, element) => {
+                    const $input = this.$(element);
                     let isSearchInput = false;
 
                     // Check input type
-                    const type = input.getAttribute('type');
+                    const type = $input.attr('type');
                     if (type === 'search' || type === 'text' || !type) {
                         isSearchInput = true;
                     }
 
                     // Check other attributes
                     if (!isSearchInput) {
-                        for (let i = 0; i < attributes.length; i++) {
-                            const attr = attributes[i];
-                            if (searchRegex.test(attr.name) || searchRegex.test(attr.value)) {
-                                isSearchInput = true;
-                                break;
-                            }
+                        const attrs = $input.attr();
+                        if (attrs) {
+                            Object.entries(attrs).forEach(([name, value]) => {
+                                if (searchRegex.test(name) || (typeof value === 'string' && searchRegex.test(value))) {
+                                    isSearchInput = true;
+                                }
+                            });
                         }
                     }
 
                     // Check for common search-related aria attributes
-                    const ariaLabel = input.getAttribute('aria-label');
-                    const ariaPlaceholder = input.getAttribute('aria-placeholder');
+                    const ariaLabel = $input.attr('aria-label');
+                    const ariaPlaceholder = $input.attr('aria-placeholder');
                     if (ariaLabel && searchRegex.test(ariaLabel)) isSearchInput = true;
                     if (ariaPlaceholder && searchRegex.test(ariaPlaceholder)) isSearchInput = true;
 
                     // Check for nearby labels
-                    const id = input.id;
+                    const id = $input.attr('id');
                     if (id) {
-                        const associatedLabel = document.querySelector(`label[for="${id}"]`);
-                        if (associatedLabel && searchRegex.test(associatedLabel.textContent || '')) {
+                        const associatedLabel = this.$(`label[for="${id}"]`);
+                        if (associatedLabel.length && searchRegex.test(associatedLabel.text())) {
                             isSearchInput = true;
                         }
                     }
 
                     if (isSearchInput) {
                         // Add classes to the set of potential inputs
-                        input.classList.forEach(className => potentialInputs.add(`.${className}`));
+                        $input.attr('class')?.split(/\s+/).forEach((className) => potentialInputs.add(`.${className}`));
 
                         // If there's an id, add it as well
-                        if (input.id) {
-                            potentialInputs.add(`#${input.id}`);
+                        if (id) {
+                            potentialInputs.add(`#${id}`);
                         }
                     }
                 });
@@ -176,18 +152,21 @@ class AdvancedHTMLParserImp implements iAdvancedHTMLParser {
             return uniqueInputs;
         }, 'findPotentialSearchInputs');
 
-    private findAnchorLinks: LoggedFunction<(document: Document, rootDomain: string) => AnchorLink[]> =
-        this.logExecutionTime((document: Document, rootDomain: string): AnchorLink[] => {
+    private findAnchorLinks: LoggedFunction<(rootDomain: string) => AnchorLink[]> =
+        this.logExecutionTime((rootDomain: string): AnchorLink[] => {
             this.logger.debug('Finding anchor links');
             const anchorLinks: AnchorLink[] = [];
 
-            try {
-                const anchorTags = document.body.querySelectorAll('a');
-                this.logger.debug(`Found ${anchorTags.length} anchor tags`);
+            if (!this.$) {
+                this.logger.warn('Cheerio instance not initialized');
+                return anchorLinks;
+            }
 
-                anchorTags.forEach((anchor, index) => {
-                    const href = anchor.getAttribute('href');
-                    if (href && anchor.querySelector('img')) {
+            try {
+                this.$('a').each((index, element) => {
+                    const $anchor = this.$(element);
+                    const href = $anchor.attr('href');
+                    if (href && $anchor.find('img').length > 0) {
                         try {
                             // Normalize the URL
                             let fullUrl: string;
@@ -200,7 +179,7 @@ class AdvancedHTMLParserImp implements iAdvancedHTMLParser {
                             }
 
                             // Get the inner text, trimming any excess whitespace
-                            const innerText = anchor.textContent?.trim() || '';
+                            const innerText = $anchor.text().trim();
 
                             anchorLinks.push({
                                 innerText: innerText,

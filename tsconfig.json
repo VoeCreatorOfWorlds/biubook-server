@@ -8,7 +8,8 @@
         "esModuleInterop": true,
         "skipLibCheck": true,
         "forceConsistentCasingInFileNames": true,
-        "lib": ["es2015", "dom"]
+        "lib": ["es2015", "dom"],
+        "types": ["jest", "node"]
     },
     "include": [
         "src/**/*"

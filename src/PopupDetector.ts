@@ -94,7 +94,7 @@ class PopupDetectorImp implements IPopupDetector {
 
         const findRejectButton: FindRejectButtonFunction = (element) => {
             const buttons = element.querySelectorAll('button, a, input[type="button"]');
-            for (const button of buttons) {
+            for (const button of Array.from(buttons)) {
                 const buttonText = button.textContent?.toLowerCase() || '';
                 if (['reject', 'decline', 'no thanks', 'close', 'dismiss', 'accept', 'agree', 'got it', 'i understand'].some(text => buttonText.includes(text))) {
                     const id = button.id ? `#${button.id}` : '';
@@ -108,7 +108,7 @@ class PopupDetectorImp implements IPopupDetector {
 
         const possiblePopups = document.querySelectorAll('div[class*="popup"], div[class*="modal"], div[id*="cookie"], div[class*="cookie"], div[class*="consent"]');
 
-        for (const popup of possiblePopups) {
+        for (const popup of Array.from(possiblePopups)) {
             if (popup.innerHTML.length > POPUP_MAX_CHAR_LENGTH) {
                 continue;
             }

@@ -37,7 +37,7 @@ export const checkExpenseHandler = async (req: Request<{}, {}, ExpenseCheckReque
     }
 
     try {
-        const browserAgent = new BrowserAgent(LLM_API_KEY!, REDIS_URL!);
+        const browserAgent = new BrowserAgent(LLM_API_KEY!, "productSearch");
         await browserAgent.initialize(); // Ensure browser is initialized
 
         const cartComparisonService = new CartComparisonService(browserAgent);

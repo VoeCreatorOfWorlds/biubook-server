@@ -1,8 +1,8 @@
 import { Page, ElementHandle } from 'puppeteer';
 import { Logger } from 'winston';
 import { AnchorLink, AdvancedHTMLParser, PopupDetector, ProductSearchItem, Product, IProductSearcher } from '../types';
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { LLM_API_KEY, REDIS_URL } from "../constants";
+import { LLMService } from './llmService';
 import Redis from 'ioredis';
 import { createHash } from 'crypto';
 
@@ -18,15 +18,15 @@ class ProductSearcherImp implements IProductSearcher {
   private logger: Logger;
   private htmlParser: AdvancedHTMLParser;
   private popupDetector: PopupDetector;
-  private genAI: GoogleGenerativeAI;
-  private model: any;
+  private model: LLMService;
   private redisClient: Redis;
 
-  constructor(logger: Logger, htmlParser: AdvancedHTMLParser, popupDetector: PopupDetector) {
+  constructor(logger: Logger, htmlParser: AdvancedHTMLParser, popupDetector: PopupDetector, model: LLMService) {
     this.logger = logger;
     this.logger.info('Initializing ProductSearcher');
     this.htmlParser = htmlParser;
     this.popupDetector = popupDetector;
+    this.model = model;
 
     if (!LLM_API_KEY) {
       throw new Error("LLM_API_KEY is not set");
@@ -36,39 +36,10 @@ class ProductSearcherImp implements IProductSearcher {
       throw new Error("REDIS_URL is not set");
     }
 
-    this.genAI = new GoogleGenerativeAI(LLM_API_KEY);
-    this.model = this.genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: this.getProductSearchSchema(),
-      },
-    });
-
     this.redisClient = new Redis(REDIS_URL);
     this.redisClient.on('error', err => this.logger.error('Redis Client Error', err));
 
     this.logger.info('ProductSearcher initialized successfully');
-  }
-
-  private getProductSearchSchema() {
-    return {
-      type: SchemaType.ARRAY,
-      items: {
-        type: SchemaType.OBJECT,
-        properties: {
-          productName: {
-            type: SchemaType.STRING,
-            description: "Title of the product",
-          },
-          price: {
-            type: SchemaType.NUMBER,
-            description: "Price of the product",
-          },
-        },
-        required: ["productName", "price"],
-      },
-    };
   }
 
   private generateHash(text: string): string {
@@ -98,7 +69,7 @@ class ProductSearcherImp implements IProductSearcher {
           throw new Error('Search input is null');
         }
 
-        await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 500)));
+        await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 10000)));
 
         const pageContent = await page.content();
         const rootDomain = new URL(page.url()).origin;
@@ -139,7 +110,7 @@ class ProductSearcherImp implements IProductSearcher {
       return result;
     }, 'getCachedOrFreshSearchResult');
 
-  private findSearchInput: LoggedFunction<(page: Page) => Promise<ElementHandle<Element> | null>> =
+  public findSearchInput: LoggedFunction<(page: Page) => Promise<ElementHandle<Element> | null>> =
     this.logExecutionTime(async (page: Page): Promise<ElementHandle<Element> | null> => {
       this.logger.debug('Finding search input');
       try {
@@ -174,13 +145,17 @@ class ProductSearcherImp implements IProductSearcher {
       }
     }, 'findSearchInput');
 
-  private performSearch: LoggedFunction<(page: Page, searchInput: ElementHandle<Element>, searchTerm: string) => Promise<void>> =
+  public performSearch: LoggedFunction<(page: Page, searchInput: ElementHandle<Element>, searchTerm: string) => Promise<void>> =
     this.logExecutionTime(async (page: Page, searchInput: ElementHandle<Element>, searchTerm: string): Promise<void> => {
       this.logger.debug(`Performing search for term: "${searchTerm}"`);
       try {
+        console.log("searchTerm: ", searchTerm);
+        console.log("searchInput: ", searchInput);
         await searchInput.type(searchTerm);
         await searchInput.press('Enter');
-        await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 10000 });
+        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 });
+        // check for popup here
+        await this.popupDetector.handlePopup(page);
         this.logger.debug('Search performed and page navigated');
       } catch (error) {
         this.logger.error(`Error performing search: ${error instanceof Error ? error.message : 'Unknown error'}`, { error });
@@ -190,12 +165,17 @@ class ProductSearcherImp implements IProductSearcher {
 
   private getStructuredDataFromAI: LoggedFunction<(content: string, maxResults: number) => Promise<ProductSearchItem[]>> =
     this.logExecutionTime(async (content: string, maxResults: number): Promise<ProductSearchItem[]> => {
-      const prompt = `List the first ${maxResults} products from this search results page with their productNames and prices: ${content}`;
+      const prompt = `List the first ${maxResults} products from this search results page with their productNames and prices: ${content}. if there are no products, return an empty array.`;
 
       try {
         const result = await this.model.generateContent(prompt);
         const rawResponse = result.response.text();
         const productSearchItems: ProductSearchItem[] = JSON.parse(rawResponse);
+
+        if (!Array.isArray(productSearchItems) || productSearchItems.length === 0) {
+          throw new Error('Invalid response from AI');
+        }
+
         console.log("productSearchItems: ", productSearchItems);
 
         this.logger.debug('Structured data extracted successfully from AI');

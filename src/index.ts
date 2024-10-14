@@ -23,7 +23,6 @@ app.post('/signup', signupHandler);
 app.post('/cart-contents', authMiddleware, retrieveCartHandler);
 app.get('/cards', authMiddleware, getCardsHandler);
 app.get('/cards/:id', authMiddleware, getCardByIdHandler);
-app.get('/kyc-check', authMiddleware, kycStatusHandler);
 
 app.post('/search-products', authMiddleware, checkExpenseHandler);
 app.post('/mock-search-products', authMiddleware, mockCheckExpenseHandler);

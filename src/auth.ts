@@ -51,10 +51,10 @@ export async function loginHandler(req: AuthenticatedRequest, res: Response): Pr
 export async function signupHandler(req: AuthenticatedRequest, res: Response): Promise<void> {
   console.log("req", req)
   console.log("body: ", req.body)
-  const { 
-    email, 
-    password, 
-    contactNumber, 
+  const {
+    email,
+    password,
+    contactNumber,
     is_business,
     businessName,
     businessAddress,
@@ -91,8 +91,8 @@ export async function signupHandler(req: AuthenticatedRequest, res: Response): P
     // Step 2: Add user details to the profile table
     const { error: profileError } = await supabase
       .from('profile')
-      .insert({ 
-        user_id: userId, 
+      .insert({
+        user_id: userId,
         contact_number: contactNumber,
         is_business: is_business
       });
@@ -160,86 +160,4 @@ export async function signupHandler(req: AuthenticatedRequest, res: Response): P
     console.error('Signup error:', error);
     res.status(400).json({ error: 'Signup failed', details: (error as Error).message });
   }
-}
-
-// Function to handle document uploads
-export async function uploadDocuments(req: AuthenticatedRequest, res: Response): Promise<void> {
-  const userId = req.user?.sub; // Assuming the user ID is stored in the 'sub' field of the JWT
-  const { is_business } = req.body;
-
-  if (!userId) {
-    res.status(401).json({ error: 'Unauthorized' });
-    return;
-  }
-
-  try {
-    if (is_business) {
-      const { 
-        business_registration_certificate,
-        bank_statement,
-        identity_documents
-      } = req.files as { 
-        business_registration_certificate: Express.Multer.File[],
-        bank_statement: Express.Multer.File[],
-        identity_documents: Express.Multer.File[]
-      };
-
-      // Upload files to Supabase storage and get their paths
-      const certPath = await uploadFile(business_registration_certificate[0], 'business_documents');
-      const statementPath = await uploadFile(bank_statement[0], 'business_documents');
-      const idPaths = await Promise.all(identity_documents.map(file => uploadFile(file, 'business_documents')));
-
-      // Update the business_kyc table
-      const { error } = await supabase
-        .from('business_kyc')
-        .update({
-          business_registration_certificate: certPath,
-          bank_statement_path: statementPath,
-          identity_document_paths: idPaths
-        })
-        .eq('user_id', userId);
-
-      if (error) throw error;
-    } else {
-      const { 
-        identity_document,
-        bank_statement
-      } = req.files as { 
-        identity_document: Express.Multer.File[],
-        bank_statement: Express.Multer.File[]
-      };
-
-      // Upload files to Supabase storage and get their paths
-      const idPath = await uploadFile(identity_document[0], 'user_documents');
-      const statementPath = await uploadFile(bank_statement[0], 'user_documents');
-
-      // Update the user_kyc table
-      const { error } = await supabase
-        .from('user_kyc')
-        .update({
-          identity_document_path: idPath,
-          bank_statement_path: statementPath
-        })
-        .eq('user_id', userId);
-
-      if (error) throw error;
-    }
-
-    res.status(200).json({ message: 'Documents uploaded successfully' });
-  } catch (error) {
-    console.error('Document upload error:', error);
-    res.status(400).json({ error: 'Document upload failed', details: (error as Error).message });
-  }
-}
-
-async function uploadFile(file: Express.Multer.File, bucket: string): Promise<string> {
-  const { data, error } = await supabase.storage
-    .from(bucket)
-    .upload(`${Date.now()}_${file.originalname}`, file.buffer, {
-      contentType: file.mimetype,
-    });
-
-  if (error) throw error;
-
-  return data.path;
 }

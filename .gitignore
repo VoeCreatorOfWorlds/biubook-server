@@ -26,3 +26,5 @@ dist-ssr
 *.env
 public/*
 logs*
+src/services/screenshots/
+results.json
