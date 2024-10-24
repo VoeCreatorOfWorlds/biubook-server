@@ -1,11 +1,7 @@
 import puppeteer, { Browser, Page } from 'puppeteer';
 import { createLogger, transports, format, Logger } from 'winston';
-import { ProductSearchResult, IBrowserAgent, AIModelHandler, AdvancedHTMLParser, PopupDetector } from './types';
-import ProductSearcherImp from './services/productSearchService';
-import AIModelHandlerImp from './services/llmService';
-import { AdvancedHTMLParserImp } from './services/advancedHTMLService';
-import PopupDetectorImp from './PopupDetector';
-import { LLMService } from './services/llmService';
+import { ProductSearchResult, IBrowserAgent, AIModelHandler, AdvancedHTMLParser, PopupDetector, Product } from './types';
+import { ProductSearcher } from './services/productSearchService';
 
 const logger: Logger = createLogger({
   level: 'debug',
@@ -21,17 +17,10 @@ const logger: Logger = createLogger({
 
 class BrowserAgent implements IBrowserAgent {
   private browser: Browser | null = null;
-  private page: Page | null = null;
-  private productSearcher: ProductSearcherImp;
-  private aiModelHandler: LLMService;
-  private htmlParser: AdvancedHTMLParser;
-  private popupDetector: PopupDetector;
+  private anthropicApiKey: string;
 
-  constructor(anthropicApiKey: string, context: string) {
-    this.aiModelHandler = new AIModelHandlerImp(anthropicApiKey, context);
-    this.htmlParser = new AdvancedHTMLParserImp(logger);
-    this.popupDetector = new PopupDetectorImp(logger);
-    this.productSearcher = new ProductSearcherImp(logger, this.htmlParser, this.popupDetector, this.aiModelHandler);
+  constructor(anthropicApiKey: string) {
+    this.anthropicApiKey = anthropicApiKey;
   }
 
   async initialize(): Promise<void> {
@@ -40,10 +29,6 @@ class BrowserAgent implements IBrowserAgent {
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox']
       });
-    }
-    if (!this.page) {
-      this.page = await this.browser.newPage();
-      this.page.setDefaultTimeout(30000); // 30 seconds
     }
   }
 
@@ -54,41 +39,46 @@ class BrowserAgent implements IBrowserAgent {
   ): Promise<ProductSearchResult[]> {
     logger.info(`Searching for product: ${productName} on ${siteUrl}`);
 
-    const products = await this.performProductSearch(siteUrl, productName, maxResults);
-    return [{ siteUrl, products: products.map(p => ({ ...p, url: "", siteUrl })) }];
+    if (!this.browser) {
+      await this.initialize();
+    }
 
-  }
-
-  async navigateToEcommerceSite(url: string): Promise<void> {
-    if (!this.page) throw new Error("Page not initialized");
-    await this.page.goto(url, { waitUntil: 'networkidle0' });
-    logger.info(`Navigated to ${url}`);
-  }
-
-  async performProductSearch(siteUrl: string, searchTerm: string, maxResults: number = 3) {
-    await this.initialize();
+    let page: Page | null = null;
     try {
-      // structure of urls 'www.takealot.com', 'businessasmission.com'
-      // let's ensure urls are correctly formatted and ncan be navigated to
-      if (!siteUrl.startsWith('https://')) {
-        siteUrl = `https://${siteUrl}`;
-      }
-      console.log(`Navigating to ${siteUrl}`);
-      await this.navigateToEcommerceSite(siteUrl);
-      if (!this.page) throw new Error("Page not initialized");
-      const products = await this.productSearcher.searchProducts(this.page, searchTerm, maxResults);
-      return products;
+      page = await this.createNewPage();
+      const productSearcher = new ProductSearcher(page, siteUrl, this.anthropicApiKey);
+      const products = await productSearcher.searchProducts(productName, maxResults);
+
+      return [{
+        siteUrl,
+        products: products.map(p => ({ ...p, siteUrl, url: p.url }))
+      }];
     } catch (error) {
       logger.error(`Product search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       return [];
+    } finally {
+      if (page) {
+        await page.close();
+      }
     }
   }
 
-  async close(): Promise<void> {
-    if (this.page) {
-      await this.page.close();
-      this.page = null;
+  private async createNewPage(): Promise<Page> {
+    if (!this.browser) throw new Error("Browser not initialized");
+    const page = await this.browser.newPage();
+    page.setDefaultTimeout(30000);
+    return page;
+  }
+
+  async navigateToEcommerceSite(page: Page, url: string): Promise<void> {
+    if (!url.startsWith('https://') && !url.startsWith('http://')) {
+      url = `https://${url}`;
     }
+    await page.goto(url, { waitUntil: 'networkidle0' });
+    logger.info(`Navigated to ${url}`);
+  }
+
+  async close(): Promise<void> {
     if (this.browser) {
       await this.browser.close();
       this.browser = null;
@@ -96,4 +86,5 @@ class BrowserAgent implements IBrowserAgent {
   }
 }
 
+export { BrowserAgent, ProductSearcher };
 export default BrowserAgent;

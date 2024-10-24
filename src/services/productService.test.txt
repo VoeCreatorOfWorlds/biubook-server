@@ -35,7 +35,7 @@ class MockLLMService implements LLMService {
 }
 
 // Import the actual AdvancedHTMLParser
-import { AdvancedHTMLParserImp as ActualAdvancedHTMLParser } from '../services/advancedHTMLService';
+import { AdvancedHTMLParserImp as ActualAdvancedHTMLParser } from './advancedHTMLService';
 
 describe('ProductSearcherImp Integration Tests', () => {
     let browser: Browser;

@@ -47,7 +47,6 @@ class AdvancedHTMLParserImp implements iAdvancedHTMLParser {
                 const potentialSearchInputs = this.findPotentialSearchInputs();
                 console.log("potentialSearchInputs: ", potentialSearchInputs);
                 const anchorLinks = this.findAnchorLinks(rootDomain);
-                console.log("anchorLinks: ", anchorLinks);
 
                 this.logger.debug('HTML parsing process completed');
                 return { bodyContent, potentialSearchInputs, anchorLinks };
@@ -59,15 +58,23 @@ class AdvancedHTMLParserImp implements iAdvancedHTMLParser {
 
     private getBodyContent: LoggedFunction<() => string> =
         this.logExecutionTime((): string => {
-            this.logger.debug('Extracting body content');
+            this.logger.debug('Extracting body content as innerText');
             if (!this.$) {
                 this.logger.warn('Cheerio instance not initialized');
                 return '';
             }
 
+            // Clone the body to avoid modifying the original
             const bodyClone = this.$('body').clone();
+
+            // Remove script and style elements
             bodyClone.find('script, style').remove();
-            let content = bodyClone.html() || '';
+
+            // Extract text content
+            let content = bodyClone.text();
+
+            // Normalize whitespace
+            content = content.replace(/\s+/g, ' ').trim();
 
             this.logger.debug(`Extracted body content (first 200 chars): ${content.slice(0, 200)}...`);
             return content;
@@ -185,8 +192,6 @@ class AdvancedHTMLParserImp implements iAdvancedHTMLParser {
                                 innerText: innerText,
                                 href: fullUrl
                             });
-
-                            this.logger.debug(`Found anchor link ${index + 1}: ${fullUrl}`);
                         } catch (urlError) {
                             this.logger.warn(`Error processing URL for anchor ${index + 1}: ${href}`, { urlError });
                         }

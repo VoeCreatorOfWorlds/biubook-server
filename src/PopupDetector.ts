@@ -1,6 +1,8 @@
-import { Page, Dialog } from 'puppeteer';
+import { Page, Dialog, ElementHandle } from 'puppeteer';
 import { Logger } from 'winston';
 import { AdvancedHTMLParserImp, ParsedContent } from './services/advancedHTMLService';
+import fs from 'fs';
+import path from 'path';
 import {
     PopupDetectionResult,
     PopupDetector as IPopupDetector,
@@ -30,6 +32,7 @@ class PopupDetectorImp implements IPopupDetector {
     private async handleDialog(dialog: Dialog): Promise<void> {
         try {
             await dialog.dismiss();
+            this.logger.info('Dialog dismissed successfully');
         } catch (error) {
             this.logger.error(`Error handling dialog: ${error}`);
         }
@@ -64,25 +67,113 @@ class PopupDetectorImp implements IPopupDetector {
         }
     }
 
-    async handlePopup(page: Page): Promise<void> {
+    async handlePopupOrDialog(page: Page): Promise<void> {
+        this.logger.info('Starting unified popup/dialog handling');
+
+        await this.setupDialogHandling(page);
+
         const { isPopup, rejectButtonSelector } = await this.detectPopup(page);
 
         if (isPopup && rejectButtonSelector) {
             this.logger.info(`Attempting to close popup with selector: ${rejectButtonSelector}`);
             try {
-                await page.click(rejectButtonSelector);
-                await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 1000)));
+                await this.clickRejectButton(page, rejectButtonSelector);
                 this.logger.info('Popup closed successfully');
-                return
             } catch (error) {
                 this.logger.error('Failed to close popup:', error);
-                return
+                await this.captureErrorScreenshot(page, 'popup_close_failed');
+                await this.handleFailedClick(page, rejectButtonSelector);
+                throw new PopupDetectorError('Failed to close popup', { selector: rejectButtonSelector });
+            }
+        } else if (isPopup) {
+            this.logger.warn('Popup detected but no reject button found');
+            await this.captureErrorScreenshot(page, 'popup_no_reject_button');
+            const popupContent = await page.content();
+            this.logger.debug("Popup content: ", popupContent);
+            throw new PopupDetectorError('Popup detected but no reject button found', { popupContent });
+        } else {
+            this.logger.info('No popup detected');
+        }
+    }
+
+    private async clickRejectButton(page: Page, selector: string): Promise<void> {
+        try {
+            await page.waitForSelector(selector, { visible: true, timeout: 5000 });
+            const element = await page.$(selector);
+            if (!element) {
+                throw new PopupDetectorError('Element not found', { selector });
+            }
+
+            const isInViewport = await page.evaluate((el) => {
+                const rect = el.getBoundingClientRect();
+                return (
+                    rect.top >= 0 &&
+                    rect.left >= 0 &&
+                    rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+                    rect.right <= (window.innerWidth || document.documentElement.clientWidth)
+                );
+            }, element);
+
+            if (!isInViewport) {
+                await element.scrollIntoView();
+            }
+
+            await element.click({ delay: 100 });
+            await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 1000)));
+        } catch (error) {
+            throw new PopupDetectorError('Failed to click reject button', {
+                selector,
+                originalError: error instanceof Error ? error.message : String(error)
+            });
+        }
+    }
+
+    private async handleFailedClick(page: Page, selector: string): Promise<void> {
+        this.logger.info('Attempting alternative methods to close popup');
+
+        try {
+            await page.evaluate((sel) => {
+                const element = document.querySelector(sel);
+                if (element) {
+                    (element as HTMLElement).click();
+                }
+            }, selector);
+            this.logger.info('Popup closed using JavaScript click');
+        } catch (error) {
+            this.logger.error('Failed to close popup using JavaScript click:', error);
+            await this.captureErrorScreenshot(page, 'popup_js_click_failed');
+
+            try {
+                await page.keyboard.press('Escape');
+                this.logger.info('Attempted to close popup by pressing Escape key');
+            } catch (escapeError) {
+                this.logger.error('Failed to close popup by pressing Escape key:', escapeError);
+                await this.captureErrorScreenshot(page, 'popup_escape_failed');
+                throw new PopupDetectorError('Failed to close popup using alternative methods', {
+                    selector,
+                    jsClickError: error instanceof Error ? error.message : String(error),
+                    escapeError: escapeError instanceof Error ? escapeError.message : String(escapeError)
+                });
             }
         }
+    }
 
-        if (isPopup) {
-            const popupContent = await page.content();
-            console.log("Popup content: ", popupContent);
+    private async captureErrorScreenshot(page: Page, errorType: string): Promise<void> {
+        try {
+            const timestamp = new Date().toISOString().replace(/:/g, '-');
+            const fileName = `${errorType}_${timestamp}.png`;
+            const dirPath = path.join(process.cwd(), 'prod-errors', 'popups');
+
+            // Ensure the directory exists
+            if (!fs.existsSync(dirPath)) {
+                fs.mkdirSync(dirPath, { recursive: true });
+            }
+
+            const filePath = path.join(dirPath, fileName);
+            await page.screenshot({ path: filePath, fullPage: true });
+            this.logger.info(`Error screenshot saved: ${filePath}`);
+        } catch (screenshotError) {
+            this.logger.error('Failed to capture error screenshot:', screenshotError);
         }
     }
 
@@ -127,6 +218,20 @@ class PopupDetectorImp implements IPopupDetector {
 
         return { isPopup: false };
     };
+}
+
+export class PopupDetectorError extends Error {
+    constructor(message: string, public readonly popupInfo?: any) {
+        super(message);
+        this.name = 'PopupDetectorError';
+
+        // This line is necessary for proper prototype chain setup in TypeScript
+        Object.setPrototypeOf(this, PopupDetectorError.prototype);
+
+        if (popupInfo) {
+            this.popupInfo = popupInfo;
+        }
+    }
 }
 
 export default PopupDetectorImp;

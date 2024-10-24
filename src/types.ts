@@ -120,8 +120,7 @@ export interface IProductSearcher {
 export interface IBrowserAgent {
   initialize(): Promise<void>;
   searchProduct(productName: string, siteUrl: string, maxResults?: number): Promise<ProductSearchResult[]>;
-  navigateToEcommerceSite(url: string): Promise<void>;
-  performProductSearch(siteUrl: string, searchTerm: string, maxResults?: number): Promise<any[]>;
+  navigateToEcommerceSite(page: Page, url: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -205,7 +204,7 @@ export interface PopupDetectionResult {
 
 export interface PopupDetector {
   detectPopup(page: Page): Promise<PopupDetectionResult>;
-  handlePopup(page: Page): Promise<void>;
+  handlePopupOrDialog(page: Page): Promise<void>;
 }
 
 export interface PopupDetectorConstructor {

@@ -1,220 +1,97 @@
-import { Page, ElementHandle } from 'puppeteer';
-import { Logger } from 'winston';
-import { AnchorLink, AdvancedHTMLParser, PopupDetector, ProductSearchItem, Product, IProductSearcher } from '../types';
-import { LLM_API_KEY, REDIS_URL } from "../constants";
+import { Page } from 'puppeteer';
+import { createLogger, transports, format, Logger } from 'winston';
+import {
+  AlternativeProduct,
+  Product,
+} from '../types';
+import { HTMLParser } from './htmlParser';
+import { SiteNavigator } from './siteNavigator';
 import { LLMService } from './llmService';
-import Redis from 'ioredis';
-import { createHash } from 'crypto';
+import AIModelHandlerImp from './llmService';
 
-interface SearchResult {
-  products: Product[];
-  rawResponse: string;
-}
+const logger: Logger = createLogger({
+  level: 'debug',
+  format: format.combine(
+    format.timestamp(),
+    format.json()
+  ),
+  transports: [
+    new transports.Console(),
+    new transports.File({ filename: 'product-searcher.log' })
+  ]
+});
+
+export class ProductSearcher {
+  private htmlParser: HTMLParser;
+  private llmService: LLMService;
+  private siteNavigator: SiteNavigator;
+
+  constructor(
+    page: Page,
+    siteUrl: string,
+    anthropicApiKey: string
+  ) {
+    this.htmlParser = new HTMLParser(logger, page);
+    this.llmService = new AIModelHandlerImp(anthropicApiKey, "productSearch");
+    this.siteNavigator = new SiteNavigator(page, siteUrl);
+  }
+
+  async searchProducts(searchTerm: string, maxResults: number = 3): Promise<AlternativeProduct[]> {
+    logger.info(`Starting product search for term: "${searchTerm}", max results: ${maxResults}`);
+
+    try {
+      // Initialize navigation
+      await this.siteNavigator.initialize();
+
+      // Perform the search
+      await this.siteNavigator.searchProduct(searchTerm);
+
+      // Parse the results page
+      const parsedContent = await this.htmlParser.parseHTML(this.siteNavigator.getCurrentPage());
+      console.log("parsedContent: ", parsedContent);
+
+      // Use LLM to extract product information
+      const prompt = `Extract product information from this search results page. Search term: ${searchTerm}
+      Page innerText: ${parsedContent.innerText}
+      
+      Return an array of products with name and price, limited to ${maxResults} results.`;
+      console.log("prompt: ", prompt);
+
+      const result = await this.llmService.generateContent(prompt);
+      const response = await result.response.text();
+
+      try {
+        let products: Product[] = JSON.parse(response);
+        logger.info(`Found ${products.length} products`);
+        console.log("products: ", products);
+
+        console.log("chosen product: ", products[0]);
+        products = [products[0]];
 
 
-type LoggedFunction<T extends (...args: any[]) => any> = T;
+        // Enhance products with URLs from parsed links using LLM
+        const linkAssignmentPrompt = `Given this product array and link array, assign the most relevant link to each product based on the product name and the link text.
+        Products: ${JSON.stringify(products)}
+        Links: ${JSON.stringify(parsedContent.links)}
+        
+        Return an array of products with their assigned URLs.`;
 
-class ProductSearcherImp implements IProductSearcher {
-  private logger: Logger;
-  private htmlParser: AdvancedHTMLParser;
-  private popupDetector: PopupDetector;
-  private model: LLMService;
-  private redisClient: Redis;
+        console.log("linkAssignmentPrompt: ", linkAssignmentPrompt);
 
-  constructor(logger: Logger, htmlParser: AdvancedHTMLParser, popupDetector: PopupDetector, model: LLMService) {
-    this.logger = logger;
-    this.logger.info('Initializing ProductSearcher');
-    this.htmlParser = htmlParser;
-    this.popupDetector = popupDetector;
-    this.model = model;
+        const linkAssignmentResult = await this.llmService.generateContent(linkAssignmentPrompt);
+        const linkAssignmentResponse = await linkAssignmentResult.response.text();
+        console.log("result.response: ", linkAssignmentResponse);
+        const enhancedProducts = JSON.parse(linkAssignmentResponse);
 
-    if (!LLM_API_KEY) {
-      throw new Error("LLM_API_KEY is not set");
+        logger.info(`Found ${enhancedProducts.length} products with assigned links`);
+        return enhancedProducts.slice(0, maxResults);
+      } catch (parseError) {
+        logger.error('Failed to parse LLM response:', parseError);
+        return [];
+      }
+    } catch (error) {
+      logger.error(`Error during product search: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return [];
     }
-
-    if (!REDIS_URL) {
-      throw new Error("REDIS_URL is not set");
-    }
-
-    this.redisClient = new Redis(REDIS_URL);
-    this.redisClient.on('error', err => this.logger.error('Redis Client Error', err));
-
-    this.logger.info('ProductSearcher initialized successfully');
   }
-
-  private generateHash(text: string): string {
-    return createHash('sha256').update(`${text}`).digest('hex');
-  }
-
-  private logExecutionTime<T extends (...args: any[]) => any>(func: T, funcName: string): LoggedFunction<T> {
-    return (async (...args: Parameters<T>) => {
-      const start = Date.now();
-      this.logger.info(`Starting ${funcName} at ${start}`);
-      const result = await func.apply(this, args);
-      const end = Date.now();
-      this.logger.info(`Finished ${funcName} at ${end}, duration: ${end - start}ms`);
-      return result;
-    }) as LoggedFunction<T>;
-  }
-
-  public searchProducts: LoggedFunction<(page: Page, searchTerm: string, maxResults?: number) => Promise<Product[]>> =
-    this.logExecutionTime(async (page: Page, searchTerm: string, maxResults: number = 2): Promise<Product[]> => {
-      this.logger.info(`Starting product search for term: "${searchTerm}", max results: ${maxResults}`);
-      try {
-        await this.popupDetector.handlePopup(page);
-        const searchInput = await this.findSearchInput(page);
-        if (searchInput) {
-          await this.performSearch(page, searchInput, searchTerm);
-        } else {
-          throw new Error('Search input is null');
-        }
-
-        await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 10000)));
-
-        const pageContent = await page.content();
-        const rootDomain = new URL(page.url()).origin;
-        const parsedContent = this.htmlParser.parseHTML(pageContent, rootDomain);
-
-        const searchResult = await this.getCachedOrFreshSearchResult(parsedContent.bodyContent, searchTerm, maxResults);
-
-        this.logger.info(`Product search completed successfully, found ${searchResult.products.length} products`);
-        return searchResult.products;
-      } catch (error) {
-        this.logger.error(`Error during product search: ${error instanceof Error ? error.message : 'Unknown error'}`, { error });
-        throw new Error('Failed to search for products');
-      }
-    }, 'searchProducts');
-
-  private getCachedOrFreshSearchResult: LoggedFunction<(content: string, searchTerm: string, maxResults: number) => Promise<SearchResult>> =
-    this.logExecutionTime(async (content: string, searchTerm: string, maxResults: number): Promise<SearchResult> => {
-      const contentHash = this.generateHash(content);
-      const cacheKey = `search:${searchTerm}:${contentHash}`;
-
-      const cachedResult = await this.redisClient.get(cacheKey);
-      if (cachedResult) {
-        this.logger.debug('Cached search result found');
-        return JSON.parse(cachedResult);
-      }
-
-      const productSearchItems = await this.getStructuredDataFromAI(content, maxResults);
-      const searchResults = await this.identifyProductLinks([], productSearchItems, searchTerm);
-
-      const result: SearchResult = {
-        products: searchResults,
-        rawResponse: JSON.stringify(productSearchItems)
-      };
-
-      await this.redisClient.set(cacheKey, JSON.stringify(result), 'EX', 3600); // Cache for 1 hour
-      this.logger.debug('Search result cached');
-
-      return result;
-    }, 'getCachedOrFreshSearchResult');
-
-  public findSearchInput: LoggedFunction<(page: Page) => Promise<ElementHandle<Element> | null>> =
-    this.logExecutionTime(async (page: Page): Promise<ElementHandle<Element> | null> => {
-      this.logger.debug('Finding search input');
-      try {
-        const pageContent = await page.content();
-        const rootDomain = new URL(page.url()).origin;
-        const parsedContent = this.htmlParser.parseHTML(pageContent, rootDomain);
-
-        if (parsedContent.potentialSearchInputs.length === 0) {
-          throw new Error('No potential search inputs found');
-        }
-
-        const timeout = 400;
-        for (const selector of parsedContent.potentialSearchInputs) {
-          try {
-            const element = await page.waitForSelector(selector, { timeout });
-            if (element) {
-              this.logger.debug(`Search input found with selector: ${selector}`);
-              return element;
-            }
-          } catch (error) {
-            if (error instanceof Error && error.name !== 'TimeoutError') {
-              throw error;
-            }
-            // If it's a TimeoutError, continue to the next selector
-          }
-        }
-
-        throw new Error('No matching search input found on page');
-      } catch (error) {
-        this.logger.error(`Error finding search input: ${error instanceof Error ? error.message : 'Unknown error'}`, { error });
-        throw new Error('Failed to find search input on page');
-      }
-    }, 'findSearchInput');
-
-  public performSearch: LoggedFunction<(page: Page, searchInput: ElementHandle<Element>, searchTerm: string) => Promise<void>> =
-    this.logExecutionTime(async (page: Page, searchInput: ElementHandle<Element>, searchTerm: string): Promise<void> => {
-      this.logger.debug(`Performing search for term: "${searchTerm}"`);
-      try {
-        console.log("searchTerm: ", searchTerm);
-        console.log("searchInput: ", searchInput);
-        await searchInput.type(searchTerm);
-        await searchInput.press('Enter');
-        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 });
-        // check for popup here
-        await this.popupDetector.handlePopup(page);
-        this.logger.debug('Search performed and page navigated');
-      } catch (error) {
-        this.logger.error(`Error performing search: ${error instanceof Error ? error.message : 'Unknown error'}`, { error });
-        throw new Error('Failed to perform search');
-      }
-    }, 'performSearch');
-
-  private getStructuredDataFromAI: LoggedFunction<(content: string, maxResults: number) => Promise<ProductSearchItem[]>> =
-    this.logExecutionTime(async (content: string, maxResults: number): Promise<ProductSearchItem[]> => {
-      const prompt = `List the first ${maxResults} products from this search results page with their productNames and prices: ${content}. if there are no products, return an empty array.`;
-
-      try {
-        const result = await this.model.generateContent(prompt);
-        const rawResponse = result.response.text();
-        const productSearchItems: ProductSearchItem[] = JSON.parse(rawResponse);
-
-        if (!Array.isArray(productSearchItems) || productSearchItems.length === 0) {
-          throw new Error('Invalid response from AI');
-        }
-
-        console.log("productSearchItems: ", productSearchItems);
-
-        this.logger.debug('Structured data extracted successfully from AI');
-        return productSearchItems.slice(0, maxResults);
-      } catch (error) {
-        this.logger.error(`Error getting structured data from AI: ${error instanceof Error ? error.message : 'Unknown error'}`, { error });
-        throw new Error('Failed to extract structured data from AI');
-      }
-    }, 'getStructuredDataFromAI');
-
-  private identifyProductLinks: LoggedFunction<(anchorLinks: AnchorLink[], productSearchItems: ProductSearchItem[], searchTerm: string) => Promise<Product[]>> =
-    this.logExecutionTime(async (anchorLinks: AnchorLink[], productSearchItems: ProductSearchItem[], searchTerm: string): Promise<Product[]> => {
-      const productItems = productSearchItems.map(item => `${item.productName}|||${item.price}`).join('\n');
-
-      const prompt = `For these products, provide URLs that would be most relevant for purchasing them:
-      Products:
-      ${productItems}
-
-      Search term: "${searchTerm}"
-
-      Return a JSON array of objects with 'productName', 'price', and 'url' properties. Use an empty string for 'url' if no relevant URL can be determined.`;
-
-      try {
-        const result = await this.model.generateContent(prompt);
-        const rawResponse = result.response.text();
-        const mappedProducts: Product[] = JSON.parse(rawResponse);
-
-        this.logger.debug(`Mapped ${mappedProducts.length} products to URLs`);
-        return mappedProducts;
-      } catch (error) {
-        this.logger.error(`Error mapping product links: ${error instanceof Error ? error.message : 'Unknown error'}`, { error });
-        return productSearchItems.map(item => ({ productName: item.productName, price: item.price, url: '' }));
-      }
-    }, 'identifyProductLinks');
-
-  public close: LoggedFunction<() => Promise<void>> =
-    this.logExecutionTime(async (): Promise<void> => {
-      await this.redisClient.quit();
-    }, 'close');
 }
-
-export default ProductSearcherImp;

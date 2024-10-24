@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI, GenerativeModel, GenerationConfig, SchemaType } from "@google/generative-ai";
+import { url } from "inspector";
 
 
 const model = "gemini-1.5-flash";
@@ -46,6 +47,10 @@ function getProductSearchSchema() {
           type: SchemaType.NUMBER,
           description: "Price of the product",
         },
+        url: {
+          type: SchemaType.STRING,
+          description: "URL of the product",
+        }
       },
       required: ["productName", "price"],
     },

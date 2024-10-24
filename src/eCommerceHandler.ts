@@ -5,7 +5,6 @@ import BrowserAgent from './BrowserAgent';
 import { CartComparisonService } from './services/cartComparisonService';
 import { OriginalCart } from './helpers/originalCart';
 import { createLogger, transports, format } from 'winston';
-import { searchAndScoreHostnames } from './services/searchEngineService';
 
 if (REDIS_URL === undefined || LLM_API_KEY === undefined) {
     console.error('Missing required environment variables. Please check your .env file.');
@@ -37,7 +36,7 @@ export const checkExpenseHandler = async (req: Request<{}, {}, ExpenseCheckReque
     }
 
     try {
-        const browserAgent = new BrowserAgent(LLM_API_KEY!, "productSearch");
+        const browserAgent = new BrowserAgent(LLM_API_KEY!);
         await browserAgent.initialize(); // Ensure browser is initialized
 
         const cartComparisonService = new CartComparisonService(browserAgent);

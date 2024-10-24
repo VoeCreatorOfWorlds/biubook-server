@@ -20,11 +20,11 @@ app.use(cors());
 
 app.post('/login', loginHandler);
 app.post('/signup', signupHandler);
-app.post('/cart-contents', authMiddleware, retrieveCartHandler);
+app.post('/cart-contents', retrieveCartHandler);
 app.get('/cards', authMiddleware, getCardsHandler);
 app.get('/cards/:id', authMiddleware, getCardByIdHandler);
 
-app.post('/search-products', authMiddleware, checkExpenseHandler);
+app.post('/search-products', checkExpenseHandler);
 app.post('/mock-search-products', authMiddleware, mockCheckExpenseHandler);
 app.post('/mock-cart-contents', authMiddleware, mockRetrieveCartHandler);
 
