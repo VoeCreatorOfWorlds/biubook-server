@@ -1,7 +1,7 @@
 import puppeteer, { Browser, Page } from 'puppeteer';
 import { createLogger, transports, format, Logger } from 'winston';
-import { ProductSearchResult, IBrowserAgent, AIModelHandler, AdvancedHTMLParser, PopupDetector, Product } from './types';
-import { ProductSearcher } from './services/productSearchService';
+import { ProductSearchResult, IBrowserAgent, AIModelHandler, AdvancedHTMLParser, PopupDetector, Product, ProductInfo } from './types';
+import { ProductExtractor } from './services/productSearchService';
 
 const logger: Logger = createLogger({
   level: 'debug',
@@ -32,11 +32,10 @@ class BrowserAgent implements IBrowserAgent {
     }
   }
 
-  async searchProduct(
+  async getProductInfo(
     productName: string,
-    siteUrl: string,
-    maxResults?: number
-  ): Promise<ProductSearchResult[]> {
+    siteUrl: string
+  ): Promise<ProductInfo | null> {
     logger.info(`Searching for product: ${productName} on ${siteUrl}`);
 
     if (!this.browser) {
@@ -46,18 +45,17 @@ class BrowserAgent implements IBrowserAgent {
     let page: Page | null = null;
     try {
       page = await this.createNewPage();
-      const productSearcher = new ProductSearcher(page, siteUrl, this.anthropicApiKey);
-      const products = await productSearcher.searchProducts(productName, maxResults);
 
-      return [{
-        siteUrl,
-        products: products.map(p => ({ ...p, siteUrl, url: p.url }))
-      }];
+      const productSearcher = new ProductExtractor(page, siteUrl, this.anthropicApiKey);
+      const product = await productSearcher.extractProduct(productName);
+
+      return product;
     } catch (error) {
       logger.error(`Product search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      return [];
+      return null;
     } finally {
       if (page) {
+        console.log("closing page");
         await page.close();
       }
     }
@@ -70,14 +68,6 @@ class BrowserAgent implements IBrowserAgent {
     return page;
   }
 
-  async navigateToEcommerceSite(page: Page, url: string): Promise<void> {
-    if (!url.startsWith('https://') && !url.startsWith('http://')) {
-      url = `https://${url}`;
-    }
-    await page.goto(url, { waitUntil: 'networkidle0' });
-    logger.info(`Navigated to ${url}`);
-  }
-
   async close(): Promise<void> {
     if (this.browser) {
       await this.browser.close();
@@ -86,5 +76,5 @@ class BrowserAgent implements IBrowserAgent {
   }
 }
 
-export { BrowserAgent, ProductSearcher };
+export { BrowserAgent, ProductExtractor };
 export default BrowserAgent;

@@ -37,7 +37,7 @@ export const checkExpenseHandler = async (req: Request<{}, {}, ExpenseCheckReque
 
     try {
         const browserAgent = new BrowserAgent(LLM_API_KEY!);
-        await browserAgent.initialize(); // Ensure browser is initialized
+        await browserAgent.initialize();
 
         const cartComparisonService = new CartComparisonService(browserAgent);
         const originalCart = new OriginalCart(cartProducts);

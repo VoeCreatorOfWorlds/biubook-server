@@ -1,170 +1,175 @@
 import axios from 'axios';
-import { parse } from 'url';
 import { CartProduct } from '../types';
 import { Logger } from 'winston';
 import { GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_ENGINE_ID } from '../constants';
 
 interface SearchResult {
+    title: string;
     link: string;
+    snippet: string;
 }
 
-interface HostnameScore {
-    hostname: string;
-    normalizedHostname: string;
-    score: number;
-    appearances: number;
-    totalProducts: number;
+interface HostnameUrls {
+    [productName: string]: string;
 }
 
-const BATCH_SIZE = 3; // Number of products to search concurrently
-const SEARCH_DELAY = 200; // Delay between searches in ms to avoid rate limiting
-const MIN_SCORE_THRESHOLD = 0.3; // Minimum score threshold for hostnames
+const EXCLUDED_DOMAINS = [
+    'youtube.com', 'facebook.com', 'twitter.com', 'instagram.com',
+    'linkedin.com', 'pinterest.com', 'reddit.com', 'wikipedia.org',
+    'quora.com', 'medium.com', 'blogspot.com', 'wordpress.com', 'pricecheck.co.za'
+];
 
-async function searchAndScoreHostnames(
-    cartProducts: CartProduct[],
-    maxResultsPerSearch: number = 10,
-    logger: Logger
-): Promise<string[]> {
-    logger.info(`Starting search for ${cartProducts.length} products`);
+export class ProductSearchService {
+    constructor(private logger: Logger) { }
 
-    const hostnameScores = new Map<string, HostnameScore>();
-    const totalProducts = cartProducts.length;
+    private async searchGoogle(query: string, maxResults: number = 10): Promise<SearchResult[]> {
+        if (!GOOGLE_SEARCH_API_KEY || !GOOGLE_SEARCH_ENGINE_ID) {
+            throw new Error('Google Search API key or Search Engine ID is missing');
+        }
 
-    // Process products in batches to control concurrency
-    for (let i = 0; i < cartProducts.length; i += BATCH_SIZE) {
-        const batch = cartProducts.slice(i, i + BATCH_SIZE);
+        const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_SEARCH_API_KEY}&cx=${GOOGLE_SEARCH_ENGINE_ID}&q=${encodeURIComponent(query)}&num=${maxResults}&cr=countryZA&gl=za`;
 
-        // Search products in batch concurrently
-        const searchPromises = batch.map(product =>
-            searchWithDelay(product.productName, maxResultsPerSearch, logger, i * SEARCH_DELAY)
-        );
+        try {
+            this.logger.debug(`Searching Google for: ${query}`);
+            const response = await axios.get(url);
 
-        const batchResults = await Promise.allSettled(searchPromises);
-
-        // Process results from the batch
-        batchResults.forEach((result, index) => {
-            if (result.status === 'fulfilled') {
-                const searchResults = result.value;
-                processSearchResults(
-                    searchResults,
-                    hostnameScores,
-                    totalProducts,
-                    maxResultsPerSearch,
-                    logger
-                );
-            } else {
-                logger.error(`Failed to search for product ${batch[index].productName}: ${result.reason}`);
+            if (!response.data.items || !Array.isArray(response.data.items)) {
+                this.logger.warn('No search results found for query:', query);
+                return [];
             }
-        });
-    }
 
-    // Calculate final scores and sort hostnames
-    const scoredHostnames = calculateFinalScores(hostnameScores, totalProducts, logger);
-
-    logger.info(`Found ${scoredHostnames.length} unique hostnames above threshold`);
-    console.log("scoredHostnames: ", scoredHostnames);
-    return scoredHostnames;
-}
-
-async function searchWithDelay(
-    query: string,
-    maxResults: number,
-    logger: Logger,
-    delay: number
-): Promise<SearchResult[]> {
-    await new Promise(resolve => setTimeout(resolve, delay));
-    return searchGoogle(query, maxResults, logger);
-}
-
-async function searchGoogle(
-    query: string,
-    maxResults: number,
-    logger: Logger
-): Promise<SearchResult[]> {
-    if (!GOOGLE_SEARCH_API_KEY || !GOOGLE_SEARCH_ENGINE_ID) {
-        throw new Error('Google Search API key or Search Engine ID is missing');
-    }
-
-    const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_SEARCH_API_KEY}&cx=${GOOGLE_SEARCH_ENGINE_ID}&q=${encodeURIComponent(query)}&num=${maxResults}&cr=countryZA`;
-
-    try {
-        logger.debug(`Searching for: ${query}`);
-        const response = await axios.get(url, {
-            validateStatus: (status) => status < 500,
-            timeout: 5000
-        });
-
-        if (response.status !== 200) {
-            logger.error(`Google Search API error: Status ${response.status}`);
+            return response.data.items.map((item: any) => ({
+                title: item.title,
+                link: item.link,
+                snippet: item.snippet || ''
+            }));
+        } catch (error) {
+            this.logger.error(`Google search error: ${error instanceof Error ? error.message : 'Unknown error'}`);
             return [];
         }
+    }
 
-        if (!response.data.items || !Array.isArray(response.data.items)) {
-            logger.warn('No search results found');
-            return [];
+    private extractDomain(url: string): string {
+        try {
+            // Handle URLs without protocol
+            if (!url.includes('://')) {
+                url = 'http://' + url;
+            }
+            const urlObj = new URL(url);
+            return urlObj.hostname.replace(/^www\./, '');
+        } catch (error) {
+            this.logger.error(`Error extracting domain from URL ${url}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            return '';
+        }
+    }
+
+    private isValidDomain(domain: string, sourceDomain: string): boolean {
+        if (!domain) return false;
+        if (domain === sourceDomain) return false;
+        if (EXCLUDED_DOMAINS.some(excluded => domain.includes(excluded))) return false;
+        return true;
+    }
+
+    private async searchProductOnDomain(product: CartProduct, domain: string): Promise<string | null> {
+        const query = `site:${domain} ${product.productName} buy price`;
+        const results = await this.searchGoogle(query, 3);
+
+        for (const result of results) {
+            const resultDomain = this.extractDomain(result.link);
+            if (resultDomain === domain && this.isProductPage(result)) {
+                return result.link;
+            }
         }
 
-        return response.data.items.map((item: any) => ({ link: item.link }));
-    } catch (error) {
-        if (axios.isAxiosError(error) && error.response) {
-            logger.error(`Google Search API error: Status ${error.response.status}`);
-        } else {
-            logger.error(`Search error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        return null;
+    }
+
+    private isProductPage(result: SearchResult): boolean {
+        const lowerTitle = result.title.toLowerCase();
+        const lowerSnippet = (result.snippet || '').toLowerCase();
+        const lowerUrl = result.link.toLowerCase();
+
+        const indicators = [
+            'price', 'buy', 'cart', 'product', 'shop', 'store',
+            'r ', 'zar', '$', '£', '€', // Currency indicators
+            'add to', 'purchase', 'order'
+        ];
+
+        return indicators.some(indicator =>
+            lowerTitle.includes(indicator) ||
+            lowerSnippet.includes(indicator) ||
+            lowerUrl.includes(indicator)
+        );
+    }
+
+    async searchAndTrackProductPages(
+        cartProducts: CartProduct[],
+        sourceURL: string
+    ): Promise<Map<string, HostnameUrls>> {
+        this.logger.info(`Starting product search for ${cartProducts.length} products`);
+        const sourceDomain = this.extractDomain(sourceURL);
+        this.logger.info(`Source domain: ${sourceDomain}`);
+
+        // Step 1: Initial search to find potential domains
+        const domainFrequency = new Map<string, number>();
+        const domainProducts = new Map<string, Set<string>>();
+
+        for (const product of cartProducts) {
+            // Search with a broader query
+            const query = `${product.productName} buy online price`;
+            const results = await this.searchGoogle(query, 10);
+            this.logger.debug(`Found ${results.length} initial results for ${product.productName}`);
+
+            for (const result of results) {
+                const domain = this.extractDomain(result.link);
+                if (!this.isValidDomain(domain, sourceDomain)) continue;
+                if (!this.isProductPage(result)) continue;
+
+                // Track domain frequency
+                domainFrequency.set(domain, (domainFrequency.get(domain) || 0) + 1);
+
+                // Track which products were found on each domain
+                if (!domainProducts.has(domain)) {
+                    domainProducts.set(domain, new Set());
+                }
+                domainProducts.get(domain)!.add(product.productName);
+            }
         }
-        return [];
+
+        // Step 2: Filter domains that have potential for all products
+        const potentialDomains = Array.from(domainFrequency.entries())
+            .filter(([domain, freq]) => freq >= cartProducts.length * 0.5) // At least 50% hit rate
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5)
+            .map(([domain]) => domain);
+
+        this.logger.info(`Found ${potentialDomains.length} potential domains to search`);
+
+        // Step 3: Detailed search for each product on potential domains
+        const finalResults = new Map<string, HostnameUrls>();
+
+        for (const domain of potentialDomains) {
+            const urlMap: HostnameUrls = {};
+            let domainValid = true;
+
+            for (const product of cartProducts) {
+                const productUrl = await this.searchProductOnDomain(product, domain);
+                if (!productUrl) {
+                    domainValid = false;
+                    break;
+                }
+                urlMap[product.productName] = productUrl;
+            }
+
+            if (domainValid) {
+                finalResults.set(domain, urlMap);
+                this.logger.info(`Successfully mapped all products for domain: ${domain}`);
+            }
+        }
+
+        this.logger.info(`Final result: found ${finalResults.size} valid sites with all products`);
+        return finalResults;
     }
 }
 
-function normalizeHostname(hostname: string): string {
-    // Remove www. and normalize to lowercase
-    return hostname.replace(/^www\./, '').toLowerCase();
-}
-
-function processSearchResults(
-    results: SearchResult[],
-    hostnameScores: Map<string, HostnameScore>,
-    totalProducts: number,
-    maxResults: number,
-    logger: Logger
-): void {
-    results.forEach((result, index) => {
-        const parsedUrl = parse(result.link);
-        const hostname = parsedUrl.hostname;
-
-        if (!hostname) return;
-
-        const normalizedHostname = normalizeHostname(hostname);
-        const existingScore = hostnameScores.get(normalizedHostname);
-        const positionScore = (maxResults - index) / maxResults; // Higher score for earlier positions
-
-        if (existingScore) {
-            existingScore.appearances += 1;
-            existingScore.score += positionScore;
-        } else {
-            hostnameScores.set(normalizedHostname, {
-                hostname,
-                normalizedHostname,
-                score: positionScore,
-                appearances: 1,
-                totalProducts
-            });
-        }
-    });
-}
-
-function calculateFinalScores(
-    hostnameScores: Map<string, HostnameScore>,
-    totalProducts: number,
-    logger: Logger
-): string[] {
-    return Array.from(hostnameScores.values())
-        .map(score => ({
-            hostname: score.hostname,
-            finalScore: (score.score / totalProducts) * (score.appearances / totalProducts)
-        }))
-        .filter(({ finalScore }) => finalScore >= MIN_SCORE_THRESHOLD)
-        .sort((a, b) => b.finalScore - a.finalScore)
-        .map(({ hostname }) => hostname);
-}
-
-export { searchAndScoreHostnames };
+export const createProductSearchService = (logger: Logger) => new ProductSearchService(logger);

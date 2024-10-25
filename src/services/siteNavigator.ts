@@ -17,7 +17,6 @@ export class SiteNavigator {
     private currentPage: Page;
     private browser: Browser | null = null;
     private siteURL: string;
-    private searchInput: ElementHandle | null = null;
 
     constructor(page: Page, siteURL: string) {
         this.currentPage = page;
@@ -70,88 +69,8 @@ export class SiteNavigator {
         }
     }
 
-    async searchProduct(productName: string): Promise<void> {
-        try {
-            const searchInput = await this.getSearchInput();
-            if (!searchInput) {
-                throw new Error('No search input found.');
-            }
-
-            await searchInput.type(productName);
-            await searchInput.press('Enter');
-
-            await this.currentPage.waitForNavigation({
-                waitUntil: 'networkidle0',
-                timeout: 15000
-            });
-        } catch (error) {
-            logger.error('Error during product search:', error);
-            throw error;
-        }
-    }
-
     public getCurrentPage(): Page {
         return this.currentPage;
-    }
-
-    async getSearchInput(): Promise<ElementHandle | null> {
-        if (this.searchInput) {
-            return this.searchInput;
-        }
-
-        try {
-            const searchRegex = /search|query|find|lookup|seek|q\b/i;
-
-            const bestSelector = await this.currentPage.evaluate((searchRegexString) => {
-                const searchRegex = new RegExp(searchRegexString);
-                const inputs = document.querySelectorAll('input');
-                let bestMatch = null;
-                let bestScore = 0;
-
-                inputs.forEach((input, index) => {
-                    let score = 0;
-
-                    const type = input.getAttribute('type');
-                    if (type === 'search') score += 3;
-                    else if (type === 'text' || !type) score += 2;
-
-                    Array.from(input.attributes).forEach(attr => {
-                        if (searchRegex.test(attr.name) || searchRegex.test(attr.value)) {
-                            score += 2;
-                        }
-                    });
-
-                    const ariaLabel = input.getAttribute('aria-label');
-                    if (ariaLabel && searchRegex.test(ariaLabel)) score += 2;
-
-                    const ariaPlaceholder = input.getAttribute('aria-placeholder');
-                    if (ariaPlaceholder && searchRegex.test(ariaPlaceholder)) score += 1;
-
-                    const id = input.getAttribute('id');
-                    if (id) {
-                        const label = document.querySelector(`label[for="${id}"]`);
-                        if (label?.textContent && searchRegex.test(label.textContent)) score += 2;
-                    }
-
-                    if (score > bestScore) {
-                        bestScore = score;
-                        bestMatch = id ? `#${id}` : `input:nth-of-type(${index + 1})`;
-                    }
-                });
-
-                return bestMatch;
-            }, searchRegex.source);
-
-            if (bestSelector) {
-                this.searchInput = await this.currentPage.$(bestSelector);
-                return this.searchInput;
-            }
-
-            return null;
-        } catch (error) {
-            logger.error('Error finding search input:', error);
-            return null;
-        }
     }
 
     async dismissCookieBanner(timeout: number = 500): Promise<boolean> {

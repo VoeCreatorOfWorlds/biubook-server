@@ -1,13 +1,10 @@
 import { Page } from 'puppeteer';
 import { createLogger, transports, format, Logger } from 'winston';
-import {
-  AlternativeProduct,
-  Product,
-} from '../types';
 import { HTMLParser } from './htmlParser';
-import { SiteNavigator } from './siteNavigator';
 import { LLMService } from './llmService';
 import AIModelHandlerImp from './llmService';
+import { ProductInfo } from '../types';
+import { SiteNavigator } from './siteNavigator';
 
 const logger: Logger = createLogger({
   level: 'debug',
@@ -17,81 +14,74 @@ const logger: Logger = createLogger({
   ),
   transports: [
     new transports.Console(),
-    new transports.File({ filename: 'product-searcher.log' })
+    new transports.File({ filename: 'product-extractor.log' })
   ]
 });
 
-export class ProductSearcher {
+interface LLMResponse {
+  productName: string;
+  price: number;
+  description: string;
+}
+
+export class ProductExtractor {
   private htmlParser: HTMLParser;
   private llmService: LLMService;
   private siteNavigator: SiteNavigator;
 
   constructor(
     page: Page,
-    siteUrl: string,
+    private siteUrl: string,
     anthropicApiKey: string
   ) {
     this.htmlParser = new HTMLParser(logger, page);
-    this.llmService = new AIModelHandlerImp(anthropicApiKey, "productSearch");
+    this.llmService = new AIModelHandlerImp(anthropicApiKey, "productExtract");
     this.siteNavigator = new SiteNavigator(page, siteUrl);
   }
 
-  async searchProducts(searchTerm: string, maxResults: number = 3): Promise<AlternativeProduct[]> {
-    logger.info(`Starting product search for term: "${searchTerm}", max results: ${maxResults}`);
+  async extractProduct(specifiedProduct: string): Promise<ProductInfo | null> {
+    await this.siteNavigator.initialize();
+    logger.info(`Extracting product info from ${this.siteUrl}`);
 
     try {
-      // Initialize navigation
-      await this.siteNavigator.initialize();
-
-      // Perform the search
-      await this.siteNavigator.searchProduct(searchTerm);
-
-      // Parse the results page
+      console.log("trying to extract product info from ", this.siteUrl);
+      // Get the current page HTML content
       const parsedContent = await this.htmlParser.parseHTML(this.siteNavigator.getCurrentPage());
-      console.log("parsedContent: ", parsedContent);
 
       // Use LLM to extract product information
-      const prompt = `Extract product information from this search results page. Search term: ${searchTerm}
-      Page innerText: ${parsedContent.innerText}
+      const prompt = `Extract product information from this product page contentfor the product "${specifiedProduct}".
+      Page content innerText: ${parsedContent.innerText}
       
-      Return an array of products with name and price, limited to ${maxResults} results.`;
-      console.log("prompt: ", prompt);
+      Return a single object with:
+      - productName: The full product name/title
+      - price: The current price as a number (no currency symbols)
+      - description: A description of the product (if available)`;
 
       const result = await this.llmService.generateContent(prompt);
       const response = await result.response.text();
 
       try {
-        let products: Product[] = JSON.parse(response);
-        logger.info(`Found ${products.length} products`);
-        console.log("products: ", products);
+        const productInfo: LLMResponse = JSON.parse(response);
+        if (!productInfo.productName || productInfo.price === undefined) {
+          logger.warn('Invalid product information extracted');
+          return null;
+        }
 
-        console.log("chosen product: ", products[0]);
-        products = [products[0]];
-
-
-        // Enhance products with URLs from parsed links using LLM
-        const linkAssignmentPrompt = `Given this product array and link array, assign the most relevant link to each product based on the product name and the link text.
-        Products: ${JSON.stringify(products)}
-        Links: ${JSON.stringify(parsedContent.links)}
-        
-        Return an array of products with their assigned URLs.`;
-
-        console.log("linkAssignmentPrompt: ", linkAssignmentPrompt);
-
-        const linkAssignmentResult = await this.llmService.generateContent(linkAssignmentPrompt);
-        const linkAssignmentResponse = await linkAssignmentResult.response.text();
-        console.log("result.response: ", linkAssignmentResponse);
-        const enhancedProducts = JSON.parse(linkAssignmentResponse);
-
-        logger.info(`Found ${enhancedProducts.length} products with assigned links`);
-        return enhancedProducts.slice(0, maxResults);
+        return {
+          productName: productInfo.productName,
+          price: productInfo.price,
+          url: this.siteUrl,
+          description: productInfo.description || '',
+        };
       } catch (parseError) {
         logger.error('Failed to parse LLM response:', parseError);
-        return [];
+        return null;
       }
     } catch (error) {
-      logger.error(`Error during product search: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      return [];
+      logger.error(`Error extracting product info: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return null;
     }
   }
 }
+
+export default ProductExtractor;

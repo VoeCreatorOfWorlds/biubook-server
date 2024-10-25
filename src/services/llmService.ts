@@ -13,6 +13,8 @@ class AIModelHandlerImp {
     let schema: GenerationConfig["responseSchema"]
     if (context === "productSearch") {
       schema = getProductSearchSchema();
+    } else if (context === "productExtract") {
+      schema = getProductInfoSchema();
     }
 
     this.model = this.genAI.getGenerativeModel({
@@ -54,6 +56,29 @@ function getProductSearchSchema() {
       },
       required: ["productName", "price"],
     },
+  };
+}
+
+
+// function to get the productInfo from a product page (productName, price, description)
+function getProductInfoSchema() {
+  return {
+    type: SchemaType.OBJECT,
+    properties: {
+      productName: {
+        type: SchemaType.STRING,
+        description: "Title of the product",
+      },
+      price: {
+        type: SchemaType.NUMBER,
+        description: "Price of the product",
+      },
+      description: {
+        type: SchemaType.STRING,
+        description: "Description of the product",
+      },
+    },
+    required: ["productName", "price", "description"],
   };
 }
 

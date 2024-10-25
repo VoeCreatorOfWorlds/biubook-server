@@ -119,8 +119,7 @@ export interface IProductSearcher {
 
 export interface IBrowserAgent {
   initialize(): Promise<void>;
-  searchProduct(productName: string, siteUrl: string, maxResults?: number): Promise<ProductSearchResult[]>;
-  navigateToEcommerceSite(page: Page, url: string): Promise<void>;
+  getProductInfo(productName: string, siteUrl: string, maxResults?: number): Promise<ProductInfo | null>;
   close(): Promise<void>;
 }
 
@@ -232,3 +231,9 @@ export interface MockCartAugmentedCart extends AlternativeCart {
   total: number;
 }
 
+export interface ProductInfo {
+  productName: string;
+  price: number;
+  description?: string;
+  url: string;
+}
