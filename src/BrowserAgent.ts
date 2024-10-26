@@ -64,7 +64,7 @@ class BrowserAgent implements IBrowserAgent {
   private async createNewPage(): Promise<Page> {
     if (!this.browser) throw new Error("Browser not initialized");
     const page = await this.browser.newPage();
-    page.setDefaultTimeout(30000);
+    page.setDefaultTimeout(5000);
     return page;
   }
 

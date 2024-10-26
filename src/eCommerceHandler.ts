@@ -48,6 +48,8 @@ export const checkExpenseHandler = async (req: Request<{}, {}, ExpenseCheckReque
             alternativeCarts
         };
 
+        console.log("Expense check result: ", expenseCheckResult);
+
         res.json({ success: true, ...expenseCheckResult });
     } catch (error) {
         logger.error(`Expense check error: ${error instanceof Error ? error.message : 'Unknown error'}`);

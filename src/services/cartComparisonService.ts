@@ -97,7 +97,7 @@ export class CartComparisonService {
                 const productUrl = urlMap[originalProduct.productName];
                 if (!productUrl) {
                     logger.warn(`Missing URL for product ${originalProduct.productName} on ${hostname}`);
-                    return null;
+                    //return null;
                 }
 
                 try {

@@ -12,6 +12,8 @@ services:
     env_file:
       - ./.env
     platform: linux/arm64
+    volumes:
+      - ./vol:/app/prod-errors
 
   redis:
     image: redis:alpine
