@@ -4,30 +4,17 @@ import { ExpenseCheckRequest, ExpenseCheckResult, CartProduct } from './types';
 import BrowserAgent from './BrowserAgent';
 import { CartComparisonService } from './services/cartComparisonService';
 import { OriginalCart } from './helpers/originalCart';
-import { createLogger, transports, format } from 'winston';
+import { AppLogger } from './services/loggerService';
+
+const logger = AppLogger.child({ service: 'eCommerceHandler' });
 
 if (REDIS_URL === undefined || LLM_API_KEY === undefined) {
-    console.error('Missing required environment variables. Please check your .env file.');
+    logger.error('Missing required environment variables. Please check your .env file.');
     process.exit(1);
 }
 
-
-
-const logger = createLogger({
-    level: 'info',
-    format: format.combine(
-        format.timestamp(),
-        format.json()
-    ),
-    transports: [
-        new transports.Console(),
-        new transports.File({ filename: 'expense-checker.log' })
-    ]
-});
-
 export const checkExpenseHandler = async (req: Request<{}, {}, ExpenseCheckRequest>, res: Response): Promise<void> => {
     const { cartProducts, hostname }: ExpenseCheckRequest = req.body;
-    console.log("Cart products: ", cartProducts);
 
     if (!cartProducts || !Array.isArray(cartProducts) || cartProducts.length === 0) {
         logger.warn('Missing required parameters in expense check request');
@@ -35,8 +22,9 @@ export const checkExpenseHandler = async (req: Request<{}, {}, ExpenseCheckReque
         return;
     }
 
+    const browserAgent = new BrowserAgent(LLM_API_KEY!);
+
     try {
-        const browserAgent = new BrowserAgent(LLM_API_KEY!);
         await browserAgent.initialize();
 
         const cartComparisonService = new CartComparisonService(browserAgent);
@@ -48,15 +36,13 @@ export const checkExpenseHandler = async (req: Request<{}, {}, ExpenseCheckReque
             alternativeCarts
         };
 
-        console.log("Expense check result: ", expenseCheckResult);
+        logger.info(`Expense check result: ${JSON.stringify(expenseCheckResult)}`);
 
         res.json({ success: true, ...expenseCheckResult });
     } catch (error) {
         logger.error(`Expense check error: ${error instanceof Error ? error.message : 'Unknown error'}`);
         res.status(500).json({ success: false, error: error instanceof Error ? error.message : 'Unknown error' });
     } finally {
-        // Ensure browser is closed after operation
-        // Note: You might want to manage this differently if you're reusing the BrowserAgent across requests
-        // await browserAgent.close();
+        await browserAgent.close();
     }
 };

@@ -1,6 +1,4 @@
 import { GoogleGenerativeAI, GenerativeModel, GenerationConfig, SchemaType } from "@google/generative-ai";
-import { url } from "inspector";
-
 
 const model = "gemini-1.5-flash";
 

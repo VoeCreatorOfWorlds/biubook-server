@@ -59,7 +59,7 @@ export class SiteNavigator {
             logger.debug(`Navigating to ${this.siteURL}`);
             await this.currentPage.goto(this.siteURL, {
                 waitUntil: 'domcontentloaded',
-                timeout: 5000
+                timeout: 2500
             });
 
             await this.dismissCookieBanner();

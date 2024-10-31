@@ -1,19 +1,9 @@
 import puppeteer, { Browser, Page } from 'puppeteer';
-import { createLogger, transports, format, Logger } from 'winston';
-import { ProductSearchResult, IBrowserAgent, AIModelHandler, AdvancedHTMLParser, PopupDetector, Product, ProductInfo } from './types';
+import { AppLogger as logger } from './services/loggerService';
+import { IBrowserAgent, ProductInfo } from './types';
 import { ProductExtractor } from './services/productSearchService';
 
-const logger: Logger = createLogger({
-  level: 'debug',
-  format: format.combine(
-    format.timestamp(),
-    format.json()
-  ),
-  transports: [
-    new transports.Console(),
-    new transports.File({ filename: 'product-searcher.log' })
-  ]
-});
+
 
 class BrowserAgent implements IBrowserAgent {
   private browser: Browser | null = null;
@@ -64,7 +54,7 @@ class BrowserAgent implements IBrowserAgent {
   private async createNewPage(): Promise<Page> {
     if (!this.browser) throw new Error("Browser not initialized");
     const page = await this.browser.newPage();
-    page.setDefaultTimeout(5000);
+    page.setDefaultTimeout(2500);
     return page;
   }
 

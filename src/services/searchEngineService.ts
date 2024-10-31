@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { CartProduct } from '../types';
 import { Logger } from 'winston';
+import { AppLogger as logger } from './loggerService';
 import { GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_ENGINE_ID } from '../constants';
 
 interface SearchResult {
@@ -28,7 +29,10 @@ const OUT_OF_STOCK_BASE_PHRASES = [
 ];
 
 export class ProductSearchService {
-    constructor(private logger: Logger) { }
+    private logger: Logger;
+    constructor() {
+        this.logger = logger.child({ service: 'SearchEngineService' });
+    }
 
     private async searchGoogle(query: string): Promise<SearchResult[]> {
         if (!GOOGLE_SEARCH_API_KEY || !GOOGLE_SEARCH_ENGINE_ID) {
@@ -188,4 +192,4 @@ export class ProductSearchService {
     }
 }
 
-export const createProductSearchService = (logger: Logger) => new ProductSearchService(logger);
+export const createProductSearchService = () => new ProductSearchService();
