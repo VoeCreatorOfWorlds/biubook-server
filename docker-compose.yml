@@ -11,13 +11,11 @@ services:
       - redis
     env_file:
       - ./.env
-    platform: linux/arm64
     volumes:
       - ./vol:/app/prod-errors
 
   redis:
     image: redis:alpine
-    platform: linux/arm64
     ports:
       - "6379:6379"
     volumes:

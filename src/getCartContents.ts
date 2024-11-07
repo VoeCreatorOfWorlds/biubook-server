@@ -35,15 +35,13 @@ export async function retrieveCartHandler(req: AuthenticatedRequest, res: Respon
     res.status(400).json({ error: 'Cart description is required' });
     return;
   }
-  /*
   if (!req.user) {
     console.warn('User is not authenticated');
     res.status(401).json({ error: 'User is not authenticated' });
     return;
   }
 
-  const userId = req.user.email;*/
-  const userId = ""
+  const userId = req.user.email;
 
   try {
     console.log('Calling retrieveCartContents');

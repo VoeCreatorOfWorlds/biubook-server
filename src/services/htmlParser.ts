@@ -1,5 +1,6 @@
 import { Page } from 'puppeteer';
 import { Logger } from 'winston';
+import { AppLogger as logger } from './loggerService';
 
 interface ParsedHTML {
     innerText: string;
@@ -10,7 +11,7 @@ export class HTMLParser {
     private page: Page;
 
     constructor(logger: Logger, page: Page) {
-        this.logger = logger;
+        this.logger = logger.child({ service: 'HTMLParser' });
         this.page = page;
     }
 
@@ -65,7 +66,7 @@ export class HTMLParser {
                 };
             });
 
-            this.logger.debug('HTML parsing completed successfully');
+            this.logger.info('HTML parsing completed successfully');
             return parsedContent;
 
         } catch (error) {

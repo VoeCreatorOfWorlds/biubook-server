@@ -4,36 +4,26 @@ import { IBrowserAgent } from '../types';
 import { ProductSearchService } from './searchEngineService';
 import { OriginalCart } from '../helpers/originalCart';
 import { MAX_RESULTS } from '../constants';
-import { createLogger, format, transports } from 'winston';
+import { AppLogger as logger } from './loggerService';
 
-const logger = createLogger({
-    level: 'info',
-    format: format.combine(
-        format.timestamp(),
-        format.json()
-    ),
-    transports: [
-        new transports.Console(),
-        new transports.File({ filename: 'cart-comparison.log' })
-    ]
-});
-
-const SITE_BATCH_SIZE = 2; // Number of sites to process concurrently
-const MAX_ATTEMPTS = 3; // Maximum number of sites to try before returning results
+const SITE_BATCH_SIZE = 3; // Number of sites to process concurrently
+const MAX_ATTEMPTS = 5; // Maximum number of sites to try before returning results
 
 export class CartComparisonService {
     private attemptCount = 0;
     private productSearchService: ProductSearchService;
+    private logger = logger;
 
     constructor(private agent: IBrowserAgent) {
-        this.productSearchService = new ProductSearchService(logger);
+        this.productSearchService = new ProductSearchService();
+        this.logger = logger.child({ service: 'CartComparisonService' });
     }
 
     async compareCart(cartProducts: CartProduct[], currentHostname: string): Promise<AlternativeCart[]> {
         const alternativeCarts: AlternativeCart[] = [];
         const originalCart = new OriginalCart(cartProducts);
 
-        logger.info(`Starting cart comparison for ${cartProducts.length} products`);
+        this.logger.info(`Starting cart comparison for ${cartProducts.length} products`);
 
         try {
             // Get sites with their product URLs
@@ -46,7 +36,7 @@ export class CartComparisonService {
                 }
             }
 
-            logger.info(`Found ${siteProductUrls.size} alternative sites to check`);
+            this.logger.info(`Found ${siteProductUrls.size} alternative sites to check`);
 
             // Convert Map entries to array for batch processing
             const sitesToProcess = Array.from(siteProductUrls.entries());
@@ -70,7 +60,7 @@ export class CartComparisonService {
                 alternativeCarts.push(...validResults);
 
                 if (alternativeCarts.length >= MAX_RESULTS || this.attemptCount >= MAX_ATTEMPTS) {
-                    logger.info(`Ending search: ${alternativeCarts.length} carts found after ${this.attemptCount} attempts`);
+                    this.logger.info(`Ending search: ${alternativeCarts.length} carts found after ${this.attemptCount} attempts`);
                     break;
                 }
             }
@@ -89,7 +79,7 @@ export class CartComparisonService {
         originalProducts: CartProduct[]
     ): Promise<AlternativeCart | null> {
         try {
-            logger.debug(`Processing site: ${hostname}`);
+            this.logger.debug(`Processing site: ${hostname}`);
             const alternativeProducts: AlternativeProduct[] = [];
 
             // Process each product URL
@@ -117,24 +107,24 @@ export class CartComparisonService {
                         };
                         alternativeProducts.push(alternativeProduct);
                     } else {
-                        logger.warn(`No product info found for ${originalProduct.productName} on ${hostname}`);
+                        this.logger.warn(`No product info found for ${originalProduct.productName} on ${hostname}`);
                         return null;
                     }
 
                 } catch (error) {
-                    logger.error(`Error processing product ${originalProduct.productName} on ${hostname}:`, error);
+                    this.logger.error(`Error processing product ${originalProduct.productName} on ${hostname}:`, error);
                     return null;
                 }
             }
 
             // Only create cart if we found all products
             if (alternativeProducts.length === originalProducts.length) {
-                logger.debug(`Successfully created alternative cart for ${hostname}`);
+                this.logger.debug(`Successfully created alternative cart for ${hostname}`);
                 return new AlternativeCartImpl(alternativeProducts, originalProducts);
             }
 
         } catch (error) {
-            logger.error(`Error processing site ${hostname}:`, error);
+            this.logger.error(`Error processing site ${hostname}:`, error);
         }
 
         return null;

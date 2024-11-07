@@ -1,5 +1,4 @@
 import { Page } from 'puppeteer';
-import { createLogger, transports, format, Logger } from 'winston';
 import Redis from 'ioredis';
 import { createHash } from 'crypto';
 import { HTMLParser } from './htmlParser';
@@ -8,18 +7,11 @@ import AIModelHandlerImp from './llmService';
 import { ProductInfo } from '../types';
 import { SiteNavigator } from './siteNavigator';
 import { REDIS_URL } from '../constants';
+import { AppLogger as logger } from './loggerService';
+import { CartProduct } from '../types';
+import { Logger } from 'winston';
 
-const logger: Logger = createLogger({
-  level: 'debug',
-  format: format.combine(
-    format.timestamp(),
-    format.json()
-  ),
-  transports: [
-    new transports.Console(),
-    new transports.File({ filename: 'product-extractor.log' })
-  ]
-});
+
 
 interface LLMResponse {
   productName: string;
@@ -38,6 +30,7 @@ export class ProductExtractor {
   private siteNavigator: SiteNavigator;
   private redisClient: Redis;
   private readonly CACHE_EXPIRY = 60 * 60 * 24; // 1 hour in seconds
+  private logger: Logger;
 
   constructor(
     page: Page,
@@ -54,8 +47,10 @@ export class ProductExtractor {
     this.redisClient = new Redis(REDIS_URL);
 
     this.redisClient.on('error', err => {
-      logger.error('Redis Client Error', err);
+      this.logger.error('Redis Client Error', err);
     });
+
+    this.logger = logger.child({ service: 'ProductExtractor' });
   }
 
   private generateCacheKey(product: string, site: string): string {
@@ -72,10 +67,10 @@ export class ProductExtractor {
         logger.debug('Cache hit for product info', { cacheKey });
         return JSON.parse(cached) as ProductInfo;
       }
-      logger.debug('Cache miss for product info', { cacheKey });
+      this.logger.debug('Cache miss for product info', { cacheKey });
       return null;
     } catch (error) {
-      logger.error('Error retrieving from cache:', error);
+      this.logger.error('Error retrieving from cache:', error);
       return null;
     }
   }
@@ -87,9 +82,9 @@ export class ProductExtractor {
         this.CACHE_EXPIRY,
         JSON.stringify(productInfo)
       );
-      logger.debug('Successfully cached product info', { cacheKey });
+      this.logger.debug('Successfully cached product info', { cacheKey });
     } catch (error) {
-      logger.error('Error caching product info:', error);
+      this.logger.error('Error caching product info:', error);
     }
   }
 
@@ -99,16 +94,17 @@ export class ProductExtractor {
     // Try to get from cache first
     const cachedProduct = await this.getCachedProduct(cacheKey);
     if (cachedProduct) {
-      logger.info('Returning cached product info');
+      this.logger.info('Returning cached product info');
       return cachedProduct;
     }
 
     // If not in cache, proceed with extraction
     await this.siteNavigator.initialize();
-    logger.info(`Extracting product info from ${this.siteUrl}`);
+    this.logger.info(`Extracting product info from ${this.siteUrl}`);
 
     try {
-      console.log("trying to extract product info from ", this.siteUrl);
+      //console.log("trying to extract product info from ", this.siteUrl);
+      this.logger.info(`Extracting product info from ${this.siteUrl}`);
       const parsedContent = await this.htmlParser.parseHTML(this.siteNavigator.getCurrentPage());
 
       const prompt = `Extract product information from this product page content for the product "${specifiedProduct}".
@@ -119,13 +115,15 @@ export class ProductExtractor {
       - price: The current price as a number (no currency symbols)
       - description: A description of the product (if available) - summarize in less than 10 words`;
 
+      console.log("prompt: ", prompt);
+
       const result = await this.llmService.generateContent(prompt);
       const response = await result.response.text();
 
       try {
         const productInfo: LLMResponse = JSON.parse(response);
         if (!productInfo.productName || productInfo.price === undefined) {
-          logger.warn('Invalid product information extracted');
+          this.logger.warn('Invalid product information extracted');
           return null;
         }
 
@@ -141,11 +139,11 @@ export class ProductExtractor {
 
         return extractedProduct;
       } catch (parseError) {
-        logger.error('Failed to parse LLM response:', parseError);
+        this.logger.error('Failed to parse LLM response:', parseError);
         return null;
       }
     } catch (error) {
-      logger.error(`Error extracting product info: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      this.logger.error(`Error extracting product info: ${error instanceof Error ? error.message : 'Unknown error'}`);
       return null;
     }
   }
