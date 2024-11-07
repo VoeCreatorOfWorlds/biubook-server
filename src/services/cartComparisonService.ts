@@ -6,8 +6,8 @@ import { OriginalCart } from '../helpers/originalCart';
 import { MAX_RESULTS } from '../constants';
 import { AppLogger as logger } from './loggerService';
 
-const SITE_BATCH_SIZE = 2; // Number of sites to process concurrently
-const MAX_ATTEMPTS = 3; // Maximum number of sites to try before returning results
+const SITE_BATCH_SIZE = 3; // Number of sites to process concurrently
+const MAX_ATTEMPTS = 5; // Maximum number of sites to try before returning results
 
 export class CartComparisonService {
     private attemptCount = 0;

@@ -9,8 +9,8 @@ on:
 env:
   AWS_REGION: us-east-1                   # Change this to your region
   ECR_REPOSITORY: buybook-backend              # Change this to your ECR repository name
-  ECS_SERVICE: buybook-backend-service             # Change this to your ECS service name
-  ECS_CLUSTER: buybook-cluster            # Change this to your ECS cluster name
+  ECS_SERVICE: buybook-main-app           # Change this to your ECS service name
+  ECS_CLUSTER: buybook            # Change this to your ECS cluster name
 
 jobs:
   build-and-push:

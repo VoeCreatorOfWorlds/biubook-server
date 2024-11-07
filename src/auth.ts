@@ -1,8 +1,7 @@
 import * as dotenv from 'dotenv';
 let o = dotenv.config();
 
-import { Request, Response, NextFunction } from 'express';
-import * as jwt from 'jsonwebtoken';
+import { Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { Claims, User } from './types';
 console.log("Oh oho: ", o)
@@ -49,26 +48,7 @@ export async function loginHandler(req: AuthenticatedRequest, res: Response): Pr
 }
 
 export async function signupHandler(req: AuthenticatedRequest, res: Response): Promise<void> {
-  console.log("req", req)
-  console.log("body: ", req.body)
-  const {
-    email,
-    password,
-    contactNumber,
-    is_business,
-    businessName,
-    businessAddress,
-    businessType,
-    businessRegistrationNumber,
-    businessRegistrationDate
-  } = req.body as User & {
-    is_business: boolean;
-    businessName?: string;
-    businessAddress?: string;
-    businessType?: string;
-    businessRegistrationNumber?: string;
-    businessRegistrationDate?: string;
-  };
+  const { email, password, contactNumber } = req.body as User;
 
   try {
     // Step 1: Create the user account
@@ -77,10 +57,7 @@ export async function signupHandler(req: AuthenticatedRequest, res: Response): P
       password,
     });
 
-    if (authError) {
-      console.log("auth error log")
-      throw authError;
-    }
+    if (authError) throw authError;
 
     const userId = authData.user?.id;
 
@@ -93,55 +70,12 @@ export async function signupHandler(req: AuthenticatedRequest, res: Response): P
       .from('profile')
       .insert({
         user_id: userId,
-        contact_number: contactNumber,
-        is_business: is_business
+        contact_number: contactNumber
       });
 
     if (profileError) throw profileError;
 
-    // Step 3: If it's a business account, add business details
-    if (is_business) {
-      const { error: businessError } = await supabase
-        .from('business_kyc')
-        .insert({
-          user_id: userId,
-          kyc_status: 'pending',
-          business_name: businessName,
-          business_address: businessAddress,
-          business_type: businessType,
-          business_registration_number: businessRegistrationNumber,
-          business_registration_date: businessRegistrationDate,
-          business_registration_certificate: '', // This will be updated later
-          bank_statement_path: '', // This will be updated later
-          identity_document_paths: [], // This will be updated later
-        });
-
-      if (businessError) throw businessError;
-    } else {
-      // If it's not a business account, create a user_kyc entry
-      const { error: userKycError } = await supabase
-        .from('user_kyc')
-        .insert({
-          user_id: userId,
-          kyc_status: 'pending',
-          identity_document_path: '', // This will be updated later
-          bank_statement_path: '', // This will be updated later
-        });
-
-      if (userKycError) throw userKycError;
-    }
-
-    // Step 4: Create a buybook entry for the user
-    const { error: buybookError } = await supabase
-      .from('buybook')
-      .insert({
-        user_id: userId,
-        verified: false,
-      });
-
-    if (buybookError) throw buybookError;
-
-    // Step 5: Create a session for the new user
+    // Step 3: Create a session for the new user
     const { data: sessionData, error: sessionError } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -149,9 +83,7 @@ export async function signupHandler(req: AuthenticatedRequest, res: Response): P
 
     if (sessionError) throw sessionError;
 
-    // Step 6: Return the tokens
-    res.status(201).json({
-      message: 'Signup successful',
+    res.json({
       access_token: sessionData.session?.access_token,
       refresh_token: sessionData.session?.refresh_token,
     });

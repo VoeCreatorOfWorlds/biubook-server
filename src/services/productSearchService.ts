@@ -115,6 +115,8 @@ export class ProductExtractor {
       - price: The current price as a number (no currency symbols)
       - description: A description of the product (if available) - summarize in less than 10 words`;
 
+      console.log("prompt: ", prompt);
+
       const result = await this.llmService.generateContent(prompt);
       const response = await result.response.text();
 
