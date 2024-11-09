@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require("cors")
 
-import * as dotenv from 'dotenv';
 import { loginHandler, signupHandler } from './auth';
 import { authMiddleware } from './middleware';
 import { retrieveCartHandler } from './getCartContents';
@@ -9,10 +8,9 @@ import { checkExpenseHandler } from './eCommerceHandler';
 import { morganMiddleware } from './services/loggerService';
 import { trackProductClickHandler } from './logClicksHandler';
 import { Request, Response } from 'express';
+import { PORT } from './constants';
 
-dotenv.config();
 const app = express();
-const port = process.env.PORT || 80;
 
 app.use(express.json());
 app.use(cors());
@@ -31,6 +29,6 @@ app.get('/health', (_req: Request, res: Response) => {
   res.send('OK');
 });
 
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });

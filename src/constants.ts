@@ -1,6 +1,20 @@
 import * as dotenv from 'dotenv';
 dotenv.config();
 
+const loadEnv = () => {
+    try {
+        if (process.env.NODE_ENV !== 'production') {
+            const dotenv = require('dotenv');
+            dotenv.config();
+        }
+    } catch (error) {
+        // If .env file doesn't exist, just continue using process.env
+        console.log('No .env file found, using environment variables');
+    }
+};
+
+loadEnv();
+
 const LLM_API_KEY = process.env.GOOGLE_API_KEY
 const REDIS_URL = process.env.REDIS_URL
 const GOOGLE_SEARCH_API_KEY = process.env.GOOGLE_SEARCH_API_KEY;
@@ -9,6 +23,11 @@ const LOGTAIL_SOURCE_TOKEN = process.env.LOGTAIL_SOURCE_TOKEN;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
 const MAX_RESULTS = 2;
+const SUPABASE_KEY = process.env.SUPABASE_KEY;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const JWT_SECRET = process.env.JWT_SECRET;
+const PORT = process.env.PORT || 80;
+
 
 
 export {
@@ -19,5 +38,9 @@ export {
     MAX_RESULTS,
     LOGTAIL_SOURCE_TOKEN,
     NODE_ENV,
-    LOG_LEVEL
+    LOG_LEVEL,
+    SUPABASE_KEY,
+    SUPABASE_URL,
+    JWT_SECRET,
+    PORT
 }

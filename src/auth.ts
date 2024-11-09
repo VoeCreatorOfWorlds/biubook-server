@@ -1,22 +1,16 @@
-import * as dotenv from 'dotenv';
-let o = dotenv.config();
+
 
 import { Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { Claims, User } from './types';
-console.log("Oh oho: ", o)
+import { SUPABASE_KEY, SUPABASE_URL, JWT_SECRET } from './constants';
 
-const jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
-const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseKey = process.env.SUPABASE_KEY || '';
-
-// Validate required environment variables
-if (!jwtSecret || !supabaseUrl || !supabaseKey) {
+if (!JWT_SECRET || !SUPABASE_URL || !SUPABASE_KEY) {
   console.error('Missing required environment variables. Please check your .env file.');
   process.exit(1);
 }
 
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // Extend the Express Request type
 export interface AuthenticatedRequest extends Request {
