@@ -3,8 +3,6 @@ name: Build and Deploy to ECR
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
 
 env:
   AWS_REGION: us-east-1                   # Change this to your region

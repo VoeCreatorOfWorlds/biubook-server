@@ -8,6 +8,7 @@ import { retrieveCartHandler } from './getCartContents';
 import { checkExpenseHandler } from './eCommerceHandler';
 import { morganMiddleware } from './services/loggerService';
 import { trackProductClickHandler } from './logClicksHandler';
+import { Request, Response } from 'express';
 
 dotenv.config();
 const app = express();
@@ -24,6 +25,11 @@ app.post('/cart-contents', authMiddleware, retrieveCartHandler);
 app.post('/search-products', authMiddleware, checkExpenseHandler);
 
 app.post('/track/product-clicks', authMiddleware, trackProductClickHandler)
+
+// add a health status check handler
+app.get('/health', (_req: Request, res: Response) => {
+  res.send('OK');
+});
 
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`);
