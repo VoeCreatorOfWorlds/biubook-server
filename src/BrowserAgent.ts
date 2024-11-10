@@ -12,9 +12,23 @@ class BrowserAgent implements IBrowserAgent {
     this.anthropicApiKey = anthropicApiKey;
   }
 
-  initialize(): void {
+  async initialize(): Promise<void> {
     if (!this.browser) {
-      this.browser = BROWSER;
+      this.browser = await puppeteer.launch({
+        headless: true,  // Use new headless mode
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',  // Crucial for containerized environments
+          '--disable-gpu',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',         // Reduces memory usage
+          '--disable-extensions',
+          '--window-size=1920,1080'
+        ],
+        protocolTimeout: 30000,      // Increase protocol timeout
+      });
     }
   }
 
@@ -25,7 +39,7 @@ class BrowserAgent implements IBrowserAgent {
     logger.info(`Searching for product: ${productName} on ${siteUrl}`);
 
     if (!this.browser) {
-      this.initialize();
+      await this.initialize();
     }
 
     let page: Page | null = null;
