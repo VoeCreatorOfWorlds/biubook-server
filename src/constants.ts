@@ -29,6 +29,35 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const PORT = process.env.PORT || 80;
 
 
+if (!GOOGLE_SEARCH_API_KEY || !GOOGLE_SEARCH_ENGINE_ID) {
+    console.log(`${GOOGLE_SEARCH_API_KEY}:::${GOOGLE_SEARCH_ENGINE_ID}`)
+    throw new Error('error missing API credentials');
+}
+
+if (!REDIS_URL) {
+    throw new Error('error missing REDIS_URL');
+}
+
+if (!LLM_API_KEY) {
+    throw new Error('error missing LLM_API_KEY');
+}
+
+if (!LOGTAIL_SOURCE_TOKEN) {
+    throw new Error('error missing LOGTAIL_SOURCE_TOKEN');
+}
+
+if (!SUPABASE_KEY || !SUPABASE_URL) {
+    throw new Error('error missing SUPABASE_KEY or SUPABASE_URL');
+}
+
+if (!JWT_SECRET) {
+    throw new Error('error missing JWT_SECRET');
+}
+
+if (!PORT) {
+    throw new Error('error missing PORT');
+}
+
 
 export {
     LLM_API_KEY,
