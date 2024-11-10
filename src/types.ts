@@ -118,7 +118,7 @@ export interface IProductSearcher {
 }
 
 export interface IBrowserAgent {
-  initialize(): Promise<void>;
+  initialize(): void;
   getProductInfo(productName: string, siteUrl: string, maxResults?: number): Promise<ProductInfo | null>;
   close(): Promise<void>;
 }

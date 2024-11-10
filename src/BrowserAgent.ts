@@ -2,8 +2,7 @@ import puppeteer, { Browser, Page } from 'puppeteer';
 import { AppLogger as logger } from './services/loggerService';
 import { IBrowserAgent, ProductInfo } from './types';
 import { ProductExtractor } from './services/productSearchService';
-
-
+import { BROWSER } from './constants';
 
 class BrowserAgent implements IBrowserAgent {
   private browser: Browser | null = null;
@@ -13,12 +12,9 @@ class BrowserAgent implements IBrowserAgent {
     this.anthropicApiKey = anthropicApiKey;
   }
 
-  async initialize(): Promise<void> {
+  initialize(): void {
     if (!this.browser) {
-      this.browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-      });
+      this.browser = BROWSER;
     }
   }
 
@@ -29,7 +25,7 @@ class BrowserAgent implements IBrowserAgent {
     logger.info(`Searching for product: ${productName} on ${siteUrl}`);
 
     if (!this.browser) {
-      await this.initialize();
+      this.initialize();
     }
 
     let page: Page | null = null;

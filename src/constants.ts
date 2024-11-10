@@ -1,4 +1,5 @@
 import * as dotenv from 'dotenv';
+import puppeteer, { Browser } from 'puppeteer';
 dotenv.config();
 
 const loadEnv = () => {
@@ -58,6 +59,32 @@ if (!PORT) {
     throw new Error('error missing PORT');
 }
 
+async function launchPuppeteer(): Promise<Browser> {
+    const browser = await puppeteer.launch({
+        headless: true,  // Use new headless mode
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',  // Crucial for containerized environments
+            '--disable-gpu',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',         // Reduces memory usage
+            '--disable-extensions',
+            '--window-size=1920,1080'
+        ],
+        protocolTimeout: 30000,      // Increase protocol timeout
+    });
+
+    return browser;
+}
+
+let BROWSER: Browser;
+
+(async () => {
+    BROWSER = await launchPuppeteer();
+})();
+
 
 export {
     LLM_API_KEY,
@@ -71,5 +98,6 @@ export {
     SUPABASE_KEY,
     SUPABASE_URL,
     JWT_SECRET,
-    PORT
+    PORT,
+    BROWSER
 }
