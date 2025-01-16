@@ -1,4 +1,4 @@
-# Node.ts Server for BuyBook Chrome Extension
+# Node.ts Server for Chrome Extension
 
 This repo uses Supabase for the database, Gemini for the LLM model, redis for caching and Google Search API for getting prdocut links and puppeteer for scraping web pages. 
 
